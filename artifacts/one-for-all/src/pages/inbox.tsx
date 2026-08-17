@@ -27,6 +27,7 @@ import {
   detectNamesInChunk,
   type NameDetectionResult,
 } from "@/lib/heuristics";
+import { categorizeTexts, detectPersonNames } from "@/lib/ai-api";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -104,6 +105,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   const [splitMode, setSplitMode] = useState<'off' | 'reviewing'>('off');
   const [splitPieces, setSplitPieces] = useState<SplitPiece[]>([]);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isSplitLoading, setIsSplitLoading] = useState(false);
 
   const invalidateAll = async () => {
     await Promise.all([
@@ -144,18 +146,73 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
   // ── Split actions ────────────────────────────────────────────────────────
 
-  const handleInitSplit = () => {
+  const handleInitSplit = async () => {
     const chunks = splitIntoChunks(entry.content);
-    const pieces: SplitPiece[] = chunks.map(text => ({
-      text,
-      category: categorizeContent(text),
-      accepted: true,
-      nameDetection: detectNamesInChunk(text, people || []),
-      linkedPersonId: null,
-      addAsNewPerson: false,
-    }));
-    setSplitPieces(pieces);
-    setSplitMode('reviewing');
+    if (chunks.length === 0) return;
+    setIsSplitLoading(true);
+
+    try {
+      // Run AI categorization and AI name detection in parallel
+      const [catResult, namesResult] = await Promise.allSettled([
+        categorizeTexts(chunks),
+        detectPersonNames(chunks),
+      ]);
+
+      const categories = catResult.status === 'fulfilled'
+        ? catResult.value.categories
+        : chunks.map(t => categorizeContent(t));
+
+      const aiNames = namesResult.status === 'fulfilled'
+        ? namesResult.value.names
+        : null;
+
+      const pieces: SplitPiece[] = chunks.map((text, i) => {
+        // For name detection: if AI returned a name, resolve against existing people;
+        // otherwise fall back to the keyword-based heuristic.
+        let nameDetection: NameDetectionResult;
+        const aiName = aiNames?.[i];
+        if (aiName) {
+          const matched = (people || []).find(p => {
+            const fn = p.name.split(' ')[0].toLowerCase();
+            return (
+              p.name.toLowerCase() === aiName.toLowerCase() ||
+              fn === aiName.toLowerCase().split(' ')[0]
+            );
+          });
+          nameDetection = matched
+            ? { matchedPerson: matched }
+            : { suggestedName: aiName };
+        } else {
+          nameDetection = detectNamesInChunk(text, people || []);
+        }
+
+        return {
+          text,
+          category: categories[i] ?? categorizeContent(text),
+          accepted: true,
+          nameDetection,
+          linkedPersonId: null,
+          addAsNewPerson: false,
+        };
+      });
+
+      setSplitPieces(pieces);
+      setSplitMode('reviewing');
+    } catch {
+      // Complete failure — build pieces with heuristics
+      const pieces: SplitPiece[] = chunks.map(text => ({
+        text,
+        category: categorizeContent(text),
+        accepted: true,
+        nameDetection: detectNamesInChunk(text, people || []),
+        linkedPersonId: null,
+        addAsNewPerson: false,
+      }));
+      setSplitPieces(pieces);
+      setSplitMode('reviewing');
+    } finally {
+      setIsSplitLoading(false);
+    }
   };
 
   const updatePiece = (i: number, patch: Partial<SplitPiece>) => {
@@ -373,10 +430,13 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
           <button
             onClick={handleInitSplit}
-            className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+            disabled={isSplitLoading}
+            className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Scissors className="w-3 h-3" />
-            Split into pieces
+            {isSplitLoading
+              ? <Loader2 className="w-3 h-3 animate-spin" />
+              : <Scissors className="w-3 h-3" />}
+            {isSplitLoading ? 'Analyzing…' : 'Split into pieces'}
           </button>
         </div>
       )}

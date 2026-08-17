@@ -1,16 +1,22 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Mic, Square, PenLine, Loader2, Sparkles } from "lucide-react";
+import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle } from "lucide-react";
 import { getMockTranscript, categorizeContent } from "@/lib/heuristics";
+import { transcribeAudio, categorizeTexts } from "@/lib/ai-api";
 import { useCreateEntry, useGetEntryStats, getGetEntryStatsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
+type TranscriptBadge = "real" | "mock" | "unavailable";
+
 export default function Home() {
   const [mode, setMode] = useState<"idle" | "recording" | "transcribing" | "editing" | "text">("idle");
   const [content, setContent] = useState("");
+  const [transcriptBadge, setTranscriptBadge] = useState<TranscriptBadge>("real");
+  const [isSaving, setIsSaving] = useState(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const audioChunks = useRef<Blob[]>([]);
   const [, setLocation] = useLocation();
   const createEntry = useCreateEntry();
   const { data: stats } = useGetEntryStats();
@@ -18,50 +24,109 @@ export default function Home() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if ((mode === 'editing' || mode === 'text') && textareaRef.current) {
+    if ((mode === "editing" || mode === "text") && textareaRef.current) {
       textareaRef.current.focus();
     }
   }, [mode]);
 
+  // ── Recording ─────────────────────────────────────────────────────────────
+
+  const doTranscription = async (blob: Blob) => {
+    const result = await transcribeAudio(blob);
+    if (result.source === "whisper" && result.transcript) {
+      setContent(result.transcript);
+      setTranscriptBadge("real");
+    } else if (result.source === "unavailable") {
+      // API key not configured — use mock with explanation
+      setContent(getMockTranscript());
+      setTranscriptBadge("unavailable");
+    } else {
+      // error — use mock silently
+      setContent(getMockTranscript());
+      setTranscriptBadge("mock");
+    }
+    setMode("editing");
+  };
+
   const handleStartRecording = async () => {
+    audioChunks.current = [];
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const blob = new Blob(audioChunks.current, { type: mimeType });
+        await doTranscription(blob);
+      };
+
       mediaRecorder.current = recorder;
       recorder.start();
       setMode("recording");
     } catch (err) {
       console.error("Mic access denied", err);
-      // Fallback to mock flow if mic fails
+      // Mic unavailable — set flag so handleStopRecording uses mock path
+      mediaRecorder.current = null;
       setMode("recording");
     }
   };
 
   const handleStopRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state === 'recording') {
+    setMode("transcribing");
+    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
+      // onstop handler (wired in handleStartRecording) calls doTranscription
       mediaRecorder.current.stop();
       mediaRecorder.current.stream.getTracks().forEach(t => t.stop());
+    } else {
+      // Mic was never available — fall back to mock immediately
+      setTimeout(() => {
+        setContent(getMockTranscript());
+        setTranscriptBadge("mock");
+        setMode("editing");
+      }, 800);
     }
-    setMode("transcribing");
-    setTimeout(() => {
-      setContent(getMockTranscript());
-      setMode("editing");
-    }, 1500);
   };
 
-  const handleSave = () => {
+  // ── Save ──────────────────────────────────────────────────────────────────
+
+  const handleSave = async () => {
     if (!content.trim()) return;
-    const suggestedCategory = categorizeContent(content);
-    createEntry.mutate(
-      { data: { content, captureType: mode === 'text' ? 'text' : 'voice', suggestedCategory } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
-          setLocation("/inbox");
-        }
+    setIsSaving(true);
+
+    // Get AI category first; fall back to keyword heuristic if unavailable
+    let suggestedCategory = categorizeContent(content); // immediate local fallback
+    try {
+      const { categories, source } = await categorizeTexts([content]);
+      if (source !== "error" && categories[0]) {
+        suggestedCategory = categories[0];
       }
-    );
+    } catch {
+      // keep heuristic
+    }
+
+    try {
+      await createEntry.mutateAsync({
+        data: {
+          content,
+          captureType: mode === "text" ? "text" : "voice",
+          suggestedCategory,
+        },
+      });
+      queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
+      setLocation("/inbox");
+    } catch (err) {
+      console.error("Save failed", err);
+      setIsSaving(false);
+    }
   };
+
+  const isSubmitting = isSaving || createEntry.isPending;
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col min-h-[100dvh] pb-24 px-6 pt-12">
@@ -103,7 +168,7 @@ export default function Home() {
               </div>
               <p className="text-lg font-medium text-foreground">Listening...</p>
             </div>
-            
+
             <button
               onClick={handleStopRecording}
               className="flex items-center justify-center w-20 h-20 rounded-full bg-foreground text-background shadow-lg hover:scale-105 active:scale-95 transition-all"
@@ -122,13 +187,30 @@ export default function Home() {
 
         {(mode === "editing" || mode === "text") && (
           <div className="flex flex-col gap-4 animate-in slide-in-from-bottom-8 fade-in duration-300 w-full">
+            {/* Transcript badge — only shown after a voice recording */}
             {mode === "editing" && (
-              <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-secondary-foreground rounded-full text-sm self-start">
-                <Sparkles className="w-4 h-4 text-primary" />
-                <span>Mock transcript — edit if needed</span>
-              </div>
+              <>
+                {transcriptBadge === "real" && (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-secondary-foreground rounded-full text-sm self-start">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    <span>Transcript — edit if needed</span>
+                  </div>
+                )}
+                {transcriptBadge === "mock" && (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-secondary-foreground rounded-full text-sm self-start">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    <span>Mock transcript — edit if needed</span>
+                  </div>
+                )}
+                {transcriptBadge === "unavailable" && (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-sm self-start">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>Transcription unavailable — using placeholder, please edit</span>
+                  </div>
+                )}
+              </>
             )}
-            
+
             <Textarea
               ref={textareaRef}
               value={content}
@@ -136,7 +218,7 @@ export default function Home() {
               placeholder="Start typing..."
               className="min-h-[200px] text-lg leading-relaxed shadow-sm bg-card border-none"
             />
-            
+
             <div className="flex gap-3">
               <Button
                 variant="ghost"
@@ -153,9 +235,9 @@ export default function Home() {
                 size="lg"
                 className="flex-1 rounded-full h-14 text-base shadow-md"
                 onClick={handleSave}
-                disabled={createEntry.isPending || !content.trim()}
+                disabled={isSubmitting || !content.trim()}
               >
-                {createEntry.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save to Inbox"}
+                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save to Inbox"}
               </Button>
             </div>
           </div>
