@@ -79,7 +79,6 @@ router.post("/entries", async (req, res): Promise<void> => {
         captureType: data.captureType,
         category: data.category ?? "inbox",
         suggestedCategory: data.suggestedCategory ?? null,
-        sourceContent: data.sourceContent ?? null,
       })
       .returning();
 

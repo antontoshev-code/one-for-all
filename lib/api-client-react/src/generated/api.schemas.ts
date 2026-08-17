@@ -53,8 +53,6 @@ export interface Entry {
   isTaskDone: boolean;
   /** @nullable */
   suggestedCategory: EntrySuggestedCategory;
-  /** @nullable */
-  sourceContent?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,7 +104,6 @@ export interface EntryInput {
   captureType: EntryInputCaptureType;
   category?: EntryInputCategory;
   suggestedCategory?: EntryInputSuggestedCategory;
-  sourceContent?: string;
 }
 
 export type EntryUpdateCategory = typeof EntryUpdateCategory[keyof typeof EntryUpdateCategory];

@@ -83,14 +83,6 @@ export default function CategoryList({ category, title, description }: CategoryL
                       {entry.content}
                     </p>
                     
-                    {/* Source attribution for split entries */}
-                    {isExpanded && entry.sourceContent && (
-                      <div className="mt-3 bg-secondary/40 rounded-xl px-3 py-2.5 border-l-2 border-muted-foreground/20">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1 font-medium">Split from capture</p>
-                        <p className="text-xs text-muted-foreground/80 leading-relaxed line-clamp-3">{entry.sourceContent}</p>
-                      </div>
-                    )}
-
                     <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
                       <span>{formatDate(entry.createdAt)}</span>
                       

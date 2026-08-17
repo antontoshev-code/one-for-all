@@ -190,7 +190,6 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
             captureType: entry.captureType,
             category: piece.category,
             suggestedCategory: piece.category,
-            sourceContent: entry.content,
           }
         });
 

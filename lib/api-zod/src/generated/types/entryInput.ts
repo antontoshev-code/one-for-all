@@ -15,5 +15,4 @@ export interface EntryInput {
   captureType: EntryInputCaptureType;
   category?: EntryInputCategory;
   suggestedCategory?: EntryInputSuggestedCategory;
-  sourceContent?: string;
 }
