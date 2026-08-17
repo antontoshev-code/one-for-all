@@ -3,20 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: One for All – voice-first personal capture API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: entries
+    description: Capture entries (voice or text)
+  - name: people
+    description: People linked to entries
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +27,421 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── Entries ────────────────────────────────────────────────────────────────
+  /entries:
+    get:
+      operationId: listEntries
+      tags: [entries]
+      summary: List entries, optionally filtered by category
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [inbox, journal, task, idea, log]
+      responses:
+        "200":
+          description: List of entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Entry"
+    post:
+      operationId: createEntry
+      tags: [entries]
+      summary: Create a new capture entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EntryInput"
+      responses:
+        "201":
+          description: Created entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entry"
+
+  /entries/stats:
+    get:
+      operationId: getEntryStats
+      tags: [entries]
+      summary: Get per-category counts and inbox count
+      responses:
+        "200":
+          description: Entry statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntryStats"
+
+  /entries/{id}:
+    get:
+      operationId: getEntry
+      tags: [entries]
+      summary: Get a single entry with linked people
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Entry detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntryDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateEntry
+      tags: [entries]
+      summary: Update an entry (categorize, toggle done, edit text)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EntryUpdate"
+      responses:
+        "200":
+          description: Updated entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entry"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteEntry
+      tags: [entries]
+      summary: Delete an entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /entries/{id}/people:
+    post:
+      operationId: linkPersonToEntry
+      tags: [entries]
+      summary: Link a person to an entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkPersonInput"
+      responses:
+        "200":
+          description: Updated entry detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntryDetail"
+
+  /entries/{id}/people/{personId}:
+    delete:
+      operationId: unlinkPersonFromEntry
+      tags: [entries]
+      summary: Remove a person link from an entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: personId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Updated entry detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntryDetail"
+
+  # ── People ─────────────────────────────────────────────────────────────────
+  /people:
+    get:
+      operationId: listPeople
+      tags: [people]
+      summary: List all people
+      responses:
+        "200":
+          description: List of people
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Person"
+    post:
+      operationId: createPerson
+      tags: [people]
+      summary: Create a new person record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PersonInput"
+      responses:
+        "201":
+          description: Created person
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Person"
+
+  /people/{id}:
+    get:
+      operationId: getPerson
+      tags: [people]
+      summary: Get a person with their linked entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Person detail with entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updatePerson
+      tags: [people]
+      summary: Update a person's name or notes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PersonUpdate"
+      responses:
+        "200":
+          description: Updated person
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Person"
+    delete:
+      operationId: deletePerson
+      tags: [people]
+      summary: Delete a person record
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    # ── Entry ────────────────────────────────────────────────────────────────
+    Entry:
+      type: object
+      required: [id, content, captureType, category, isTaskDone, suggestedCategory, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        captureType:
+          type: string
+          enum: [voice, text]
+        category:
+          type: string
+          enum: [inbox, journal, task, idea, log]
+        isTaskDone:
+          type: boolean
+        suggestedCategory:
+          type: ["string", "null"]
+          enum: [journal, task, idea, log, null]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EntryDetail:
+      allOf:
+        - $ref: "#/components/schemas/Entry"
+        - type: object
+          required: [people]
+          properties:
+            people:
+              type: array
+              items:
+                $ref: "#/components/schemas/Person"
+
+    EntryInput:
+      type: object
+      required: [content, captureType]
+      properties:
+        content:
+          type: string
+          minLength: 1
+        captureType:
+          type: string
+          enum: [voice, text]
+        category:
+          type: string
+          enum: [inbox, journal, task, idea, log]
+        suggestedCategory:
+          type: string
+          enum: [journal, task, idea, log]
+
+    EntryUpdate:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+        category:
+          type: string
+          enum: [inbox, journal, task, idea, log]
+        isTaskDone:
+          type: boolean
+        suggestedCategory:
+          type: string
+          enum: [journal, task, idea, log]
+
+    EntryStats:
+      type: object
+      required: [inbox, journal, task, idea, log, total]
+      properties:
+        inbox:
+          type: integer
+        journal:
+          type: integer
+        task:
+          type: integer
+        idea:
+          type: integer
+        log:
+          type: integer
+        total:
+          type: integer
+
+    LinkPersonInput:
+      type: object
+      required: [personId]
+      properties:
+        personId:
+          type: integer
+
+    # ── Person ───────────────────────────────────────────────────────────────
+    Person:
+      type: object
+      required: [id, name, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    PersonDetail:
+      allOf:
+        - $ref: "#/components/schemas/Person"
+        - type: object
+          required: [entries]
+          properties:
+            entries:
+              type: array
+              items:
+                $ref: "#/components/schemas/Entry"
+
+    PersonInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        notes:
+          type: string
+
+    PersonUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        notes:
+          type: string

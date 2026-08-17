@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "One for All"
+description = "A voice-first personal capture app for quickly recording thoughts via mic or text, then organizing them into Journal, Task, Idea, and Log categories with keyword-based AI suggestions and simple People linking. Single local user, no login required, mobile-first responsive design."
+version = "1.0.0"
+id = "artifacts/one-for-all"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25079
+
+[services.development]
+run = "pnpm --filter @workspace/one-for-all run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/one-for-all", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/one-for-all/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25079"
+BASE_PATH = "/"
