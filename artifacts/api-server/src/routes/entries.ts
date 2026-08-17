@@ -15,6 +15,22 @@ import {
 
 const router: IRouter = Router();
 
+// ── Server-side dedup guard ───────────────────────────────────────────────
+// Single-user app: reject identical content submitted within 500 ms.
+// Protects against network retries and client-side bugs slipping through.
+const recentSubmissions = new Map<string, number>(); // content key → epoch ms
+
+function isDuplicate(content: string): boolean {
+  const key = content.trim();
+  const now = Date.now();
+  const last = recentSubmissions.get(key);
+  if (last !== undefined && now - last < 500) return true;
+  recentSubmissions.set(key, now);
+  // Auto-evict after 1 s so the map never grows
+  setTimeout(() => recentSubmissions.delete(key), 1000);
+  return false;
+}
+
 // Helper: fetch entry with its linked people
 async function getEntryWithPeople(id: number) {
   const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, id));
@@ -71,6 +87,12 @@ router.post("/entries", async (req, res): Promise<void> => {
   }
 
   const data = parsed.data;
+
+  if (isDuplicate(data.content)) {
+    res.status(409).json({ error: "Duplicate submission — identical content received within 500 ms" });
+    return;
+  }
+
   try {
     const [entry] = await db
       .insert(entriesTable)

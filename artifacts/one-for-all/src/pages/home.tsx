@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle, CheckCircle2 } from "lucide-react";
 import { getMockTranscript, categorizeContent } from "@/lib/heuristics";
 import { transcribeAudio, categorizeTexts } from "@/lib/ai-api";
 import { logEvent } from "@/lib/analytics";
+import { useToast } from "@/hooks/use-toast";
 import { useCreateEntry, useGetEntryStats, getGetEntryStatsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,14 @@ export default function Home() {
   const [content, setContent] = useState("");
   const [transcriptBadge, setTranscriptBadge] = useState<TranscriptBadge>("real");
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+
+  // ── Synchronous request lock ──────────────────────────────────────────────
+  // React state updates are async — a second click can fire before re-render
+  // sets `disabled`. The ref is read synchronously on every click event,
+  // making any subsequent click a guaranteed no-op until the lock is released.
+  const submittingRef = useRef(false);
+
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const [, setLocation] = useLocation();
@@ -23,6 +32,7 @@ export default function Home() {
   const { data: stats } = useGetEntryStats();
   const queryClient = useQueryClient();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if ((mode === "editing" || mode === "text") && textareaRef.current) {
@@ -38,11 +48,9 @@ export default function Home() {
       setContent(result.transcript);
       setTranscriptBadge("real");
     } else if (result.source === "unavailable") {
-      // API key not configured — use mock with explanation
       setContent(getMockTranscript());
       setTranscriptBadge("unavailable");
     } else {
-      // error — use mock silently
       setContent(getMockTranscript());
       setTranscriptBadge("mock");
     }
@@ -70,7 +78,6 @@ export default function Home() {
       setMode("recording");
     } catch (err) {
       console.error("Mic access denied", err);
-      // Mic unavailable — set flag so handleStopRecording uses mock path
       mediaRecorder.current = null;
       setMode("recording");
     }
@@ -79,11 +86,9 @@ export default function Home() {
   const handleStopRecording = () => {
     setMode("transcribing");
     if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
-      // onstop handler (wired in handleStartRecording) calls doTranscription
       mediaRecorder.current.stop();
       mediaRecorder.current.stream.getTracks().forEach(t => t.stop());
     } else {
-      // Mic was never available — fall back to mock immediately
       setTimeout(() => {
         setContent(getMockTranscript());
         setTranscriptBadge("mock");
@@ -95,11 +100,17 @@ export default function Home() {
   // ── Save ──────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
+    // ── Layer 1: synchronous ref lock (beats React's async re-render) ────────
+    // All subsequent clicks are ignored until the lock is released.
+    if (submittingRef.current) return;
     if (!content.trim()) return;
-    setIsSaving(true);
 
-    // Get AI category first; fall back to keyword heuristic if unavailable
-    let suggestedCategory = categorizeContent(content); // immediate local fallback
+    submittingRef.current = true;  // SET BEFORE any await — this is the guard
+    setIsSaving(true);             // drives visual disabled + spinner (async, that's fine)
+    setSaveError(false);
+
+    // ── Step 1: AI categorisation (best-effort, non-blocking on failure) ─────
+    let suggestedCategory = categorizeContent(content);
     try {
       const { categories, source } = await categorizeTexts([content]);
       if (source !== "error" && categories[0]) {
@@ -109,6 +120,7 @@ export default function Home() {
       // keep heuristic
     }
 
+    // ── Step 2: persist ──────────────────────────────────────────────────────
     try {
       await createEntry.mutateAsync({
         data: {
@@ -117,18 +129,26 @@ export default function Home() {
           suggestedCategory,
         },
       });
+
       queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
       logEvent("capture_created", {
         captureType: mode === "text" ? "text" : "voice",
         suggestedCategory,
       });
+
+      toast({ title: "Saved to Inbox ✓" });
       setLocation("/inbox");
+      // Component unmounts — ref + state reset naturally. Do NOT release the lock
+      // here or a fast navigation back could re-enable the button mid-flight.
     } catch (err) {
       console.error("Save failed", err);
+      setSaveError(true);
       setIsSaving(false);
+      submittingRef.current = false;  // release lock so user can retry
     }
   };
 
+  // Visual disabled state — driven by state (ref drives the handler guard)
   const isSubmitting = isSaving || createEntry.isPending;
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -192,7 +212,7 @@ export default function Home() {
 
         {(mode === "editing" || mode === "text") && (
           <div className="flex flex-col gap-4 animate-in slide-in-from-bottom-8 fade-in duration-300 w-full">
-            {/* Transcript badge — only shown after a voice recording */}
+            {/* Transcript badge */}
             {mode === "editing" && (
               <>
                 {transcriptBadge === "real" && (
@@ -222,7 +242,16 @@ export default function Home() {
               onChange={(e) => setContent(e.target.value)}
               placeholder="Start typing..."
               className="min-h-[200px] text-lg leading-relaxed shadow-sm bg-card border-none"
+              disabled={isSubmitting}
             />
+
+            {/* Error state */}
+            {saveError && (
+              <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/5 border border-destructive/20 rounded-2xl px-4 py-3">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>Couldn't save — please try again.</span>
+              </div>
+            )}
 
             <div className="flex gap-3">
               <Button
@@ -232,17 +261,33 @@ export default function Home() {
                 onClick={() => {
                   setMode("idle");
                   setContent("");
+                  setSaveError(false);
                 }}
+                disabled={isSubmitting}
               >
                 Cancel
               </Button>
+
               <Button
                 size="lg"
                 className="flex-1 rounded-full h-14 text-base shadow-md"
                 onClick={handleSave}
                 disabled={isSubmitting || !content.trim()}
+                aria-busy={isSubmitting}
               >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save to Inbox"}
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                    Saving…
+                  </>
+                ) : saveError ? (
+                  <>
+                    <AlertCircle className="w-5 h-5 mr-2" />
+                    Try again
+                  </>
+                ) : (
+                  "Save to Inbox"
+                )}
               </Button>
             </div>
           </div>

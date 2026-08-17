@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useListPeople, useCreatePerson, getListPeopleQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Users, ChevronRight, AlertCircle } from "lucide-react";
@@ -12,15 +12,23 @@ export default function People() {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState("");
+  // Synchronous lock — guards against rapid double-submission before re-render
+  const submittingRef = useRef(false);
 
   const handleAdd = () => {
     const name = newName.trim();
     if (!name) return;
+    if (submittingRef.current) return;   // synchronous guard
+    submittingRef.current = true;
     createPerson.mutate({ data: { name } }, {
       onSuccess: () => {
         setNewName("");
         setIsAdding(false);
         queryClient.invalidateQueries({ queryKey: getListPeopleQueryKey() });
+        submittingRef.current = false;
+      },
+      onError: () => {
+        submittingRef.current = false;
       },
     });
   };

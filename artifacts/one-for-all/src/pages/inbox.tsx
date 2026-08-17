@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   useListEntries,
   useUpdateEntry,
@@ -120,6 +120,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   const [splitPieces, setSplitPieces] = useState<SplitPiece[]>([]);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSplitLoading, setIsSplitLoading] = useState(false);
+  // Synchronous lock for confirm-split — prevents double-fire before re-render
+  const confirmingRef = useRef(false);
 
   const invalidateAll = async () => {
     await Promise.all([
@@ -240,6 +242,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   const handleConfirmSplit = async () => {
     const accepted = splitPieces.filter(p => p.accepted);
     if (accepted.length === 0) return;
+    if (confirmingRef.current) return;   // synchronous guard
+    confirmingRef.current = true;        // set before first await
     setIsConfirming(true);
     try {
       for (const piece of accepted) {
@@ -285,8 +289,9 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     } catch (e) {
       console.error("Split confirm failed", e);
       setIsConfirming(false);
+      confirmingRef.current = false;  // release lock so user can retry
     }
-    // Note: no finally — success path sets isConfirming via component unmount
+    // Note: no finally on success path — component unmounts on navigation
   };
 
   const suggestedCat = entry.suggestedCategory || 'journal';
