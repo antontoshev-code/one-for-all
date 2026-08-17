@@ -30,6 +30,7 @@ export const ListEntriesResponseItem = zod.object({
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']),
   "isTaskDone": zod.boolean(),
   "suggestedCategory": zod.union([zod.literal('journal'),zod.literal('task'),zod.literal('idea'),zod.literal('log'),zod.literal(null)]).nullable(),
+  "sourceContent": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -46,7 +47,8 @@ export const CreateEntryBody = zod.object({
   "content": zod.string().min(1),
   "captureType": zod.enum(['voice', 'text']),
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']).optional(),
-  "suggestedCategory": zod.enum(['journal', 'task', 'idea', 'log']).optional()
+  "suggestedCategory": zod.enum(['journal', 'task', 'idea', 'log']).optional(),
+  "sourceContent": zod.string().optional()
 })
 
 export const CreateEntryResponse = zod.object({
@@ -56,6 +58,7 @@ export const CreateEntryResponse = zod.object({
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']),
   "isTaskDone": zod.boolean(),
   "suggestedCategory": zod.union([zod.literal('journal'),zod.literal('task'),zod.literal('idea'),zod.literal('log'),zod.literal(null)]).nullable(),
+  "sourceContent": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -88,6 +91,7 @@ export const GetEntryResponse = zod.object({
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']),
   "isTaskDone": zod.boolean(),
   "suggestedCategory": zod.union([zod.literal('journal'),zod.literal('task'),zod.literal('idea'),zod.literal('log'),zod.literal(null)]).nullable(),
+  "sourceContent": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }).and(zod.object({
@@ -124,6 +128,7 @@ export const UpdateEntryResponse = zod.object({
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']),
   "isTaskDone": zod.boolean(),
   "suggestedCategory": zod.union([zod.literal('journal'),zod.literal('task'),zod.literal('idea'),zod.literal('log'),zod.literal(null)]).nullable(),
+  "sourceContent": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -157,6 +162,7 @@ export const LinkPersonToEntryResponse = zod.object({
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']),
   "isTaskDone": zod.boolean(),
   "suggestedCategory": zod.union([zod.literal('journal'),zod.literal('task'),zod.literal('idea'),zod.literal('log'),zod.literal(null)]).nullable(),
+  "sourceContent": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }).and(zod.object({
@@ -184,6 +190,7 @@ export const UnlinkPersonFromEntryResponse = zod.object({
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']),
   "isTaskDone": zod.boolean(),
   "suggestedCategory": zod.union([zod.literal('journal'),zod.literal('task'),zod.literal('idea'),zod.literal('log'),zod.literal(null)]).nullable(),
+  "sourceContent": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }).and(zod.object({
@@ -247,6 +254,7 @@ export const GetPersonResponse = zod.object({
   "category": zod.enum(['inbox', 'journal', 'task', 'idea', 'log']),
   "isTaskDone": zod.boolean(),
   "suggestedCategory": zod.union([zod.literal('journal'),zod.literal('task'),zod.literal('idea'),zod.literal('log'),zod.literal(null)]).nullable(),
+  "sourceContent": zod.string().nullish(),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 }))

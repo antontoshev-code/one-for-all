@@ -17,6 +17,8 @@ export interface Entry {
   isTaskDone: boolean;
   /** @nullable */
   suggestedCategory: EntrySuggestedCategory;
+  /** @nullable */
+  sourceContent?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

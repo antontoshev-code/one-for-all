@@ -327,6 +327,8 @@ components:
         suggestedCategory:
           type: ["string", "null"]
           enum: [journal, task, idea, log, null]
+        sourceContent:
+          type: ["string", "null"]
         createdAt:
           type: string
           format: date-time
@@ -361,6 +363,8 @@ components:
         suggestedCategory:
           type: string
           enum: [journal, task, idea, log]
+        sourceContent:
+          type: string
 
     EntryUpdate:
       type: object

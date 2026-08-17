@@ -12,6 +12,7 @@ export const entriesTable = pgTable("entries", {
   category: categoryEnum("category").notNull().default("inbox"),
   isTaskDone: boolean("is_task_done").notNull().default(false),
   suggestedCategory: text("suggested_category"),
+  sourceContent: text("source_content"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
