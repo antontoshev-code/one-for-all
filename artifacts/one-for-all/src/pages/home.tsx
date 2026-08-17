@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle } from "lucide-react";
 import { getMockTranscript, categorizeContent } from "@/lib/heuristics";
 import { transcribeAudio, categorizeTexts } from "@/lib/ai-api";
+import { logEvent } from "@/lib/analytics";
 import { useCreateEntry, useGetEntryStats, getGetEntryStatsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -117,6 +118,10 @@ export default function Home() {
         },
       });
       queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
+      logEvent("capture_created", {
+        captureType: mode === "text" ? "text" : "voice",
+        suggestedCategory,
+      });
       setLocation("/inbox");
     } catch (err) {
       console.error("Save failed", err);

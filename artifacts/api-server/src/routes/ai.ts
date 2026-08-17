@@ -241,4 +241,20 @@ Rules:
   }
 });
 
+// ── GET /ai/status ────────────────────────────────────────────────────────
+// Returns which AI providers are configured (without revealing keys).
+
+router.get("/ai/status", (_req, res) => {
+  res.json({
+    transcription: {
+      provider: "openai-whisper",
+      active: !!process.env.OPENAI_API_KEY,
+    },
+    categorization: {
+      provider: "claude",
+      active: !!process.env.ANTHROPIC_API_KEY,
+    },
+  });
+});
+
 export default router;

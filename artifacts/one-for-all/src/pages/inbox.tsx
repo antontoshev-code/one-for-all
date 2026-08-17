@@ -15,8 +15,9 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2, Check, X, UserPlus, Scissors, ChevronLeft,
-  CheckCheck, UserCheck,
+  CheckCheck, UserCheck, AlertCircle,
 } from "lucide-react";
+import { logEvent } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -45,12 +46,25 @@ interface SplitPiece {
 // ── Inbox page ────────────────────────────────────────────────────────────
 
 export default function Inbox() {
-  const { data: entries, isLoading } = useListEntries({ category: 'inbox' });
+  const { data: entries, isLoading, isError, refetch } = useListEntries({ category: 'inbox' });
 
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col h-screen px-6 pt-12 pb-24 items-center justify-center text-center gap-4">
+        <AlertCircle className="w-10 h-10 text-muted-foreground/50" />
+        <div>
+          <p className="font-medium text-foreground mb-1">Couldn't load your Inbox</p>
+          <p className="text-sm text-muted-foreground">Check your connection and try again.</p>
+        </div>
+        <Button variant="outline" className="rounded-full" onClick={() => refetch()}>Retry</Button>
       </div>
     );
   }
@@ -263,6 +277,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
       // Remove original from inbox — must happen before closing overlay
       await deleteEntry.mutateAsync({ id: entry.id });
 
+      logEvent('capture_split', { pieces: accepted.length, entryId: entry.id });
+
       // Await the refetch so the list is already updated before we dismiss
       await invalidateAll();
       setSplitMode('off');
@@ -373,7 +389,11 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
               variant="secondary"
               size="sm"
               className="rounded-full bg-background"
-              onClick={() => { handleProcess(cat); setIsChangingCat(false); }}
+              onClick={() => {
+                logEvent('suggestion_rejected', { suggested: suggestedCat, chosen: cat, entryId: entry.id });
+                handleProcess(cat);
+                setIsChangingCat(false);
+              }}
             >
               {cat}
             </Button>
@@ -407,7 +427,10 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
             <div className="flex gap-2">
               <Button
                 className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90 h-10"
-                onClick={() => handleProcess(suggestedCat as Category)}
+                onClick={() => {
+                  logEvent('suggestion_accepted', { category: suggestedCat, entryId: entry.id });
+                  handleProcess(suggestedCat as Category);
+                }}
               >
                 Accept
               </Button>
