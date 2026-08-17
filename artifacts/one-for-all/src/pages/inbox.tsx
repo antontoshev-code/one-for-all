@@ -94,6 +94,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
   // Single-category flow
   const [isChangingCat, setIsChangingCat] = useState(false);
+  // Skip state
+  const [isSkipped, setIsSkipped] = useState(false);
   // Link person popover
   const [personSearch, setPersonSearch] = useState("");
   const [newPersonName, setNewPersonName] = useState("");
@@ -103,9 +105,11 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   const [splitPieces, setSplitPieces] = useState<SplitPiece[]>([]);
   const [isConfirming, setIsConfirming] = useState(false);
 
-  const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category: 'inbox' }) });
-    queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
+  const invalidateAll = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category: 'inbox' }) }),
+      queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() }),
+    ]);
   };
 
   // ── Single-category actions ──────────────────────────────────────────────
@@ -199,16 +203,17 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         }
       }
 
-      // Remove original from inbox
+      // Remove original from inbox — must happen before closing overlay
       await deleteEntry.mutateAsync({ id: entry.id });
 
-      invalidateAll();
+      // Await the refetch so the list is already updated before we dismiss
+      await invalidateAll();
       setSplitMode('off');
     } catch (e) {
       console.error("Split confirm failed", e);
-    } finally {
       setIsConfirming(false);
     }
+    // Note: no finally — success path sets isConfirming via component unmount
   };
 
   const suggestedCat = entry.suggestedCategory || 'journal';
@@ -329,28 +334,42 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
             </p>
           </div>
 
-          <div className="flex gap-2">
-            <Button
-              className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90 h-10"
-              onClick={() => handleProcess(suggestedCat as Category)}
-            >
-              Accept
-            </Button>
-            <Button
-              variant="outline"
-              className="rounded-full h-10 px-4"
-              onClick={() => setIsChangingCat(true)}
-            >
-              Change
-            </Button>
-            <Button
-              variant="ghost"
-              className="rounded-full h-10 px-4 text-muted-foreground"
-              onClick={() => handleProcess('inbox')}
-            >
-              Skip
-            </Button>
-          </div>
+          {isSkipped ? (
+            <div className="flex items-center justify-between px-1">
+              <p className="text-sm text-muted-foreground">Skipped — come back later</p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rounded-full h-8 text-xs text-muted-foreground"
+                onClick={() => setIsSkipped(false)}
+              >
+                Undo
+              </Button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button
+                className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90 h-10"
+                onClick={() => handleProcess(suggestedCat as Category)}
+              >
+                Accept
+              </Button>
+              <Button
+                variant="outline"
+                className="rounded-full h-10 px-4"
+                onClick={() => setIsChangingCat(true)}
+              >
+                Change
+              </Button>
+              <Button
+                variant="ghost"
+                className="rounded-full h-10 px-4 text-muted-foreground"
+                onClick={() => setIsSkipped(true)}
+              >
+                Skip
+              </Button>
+            </div>
+          )}
 
           <button
             onClick={handleInitSplit}
@@ -455,6 +474,14 @@ function SplitPieceCard({
 }: SplitPieceCardProps) {
   const categories: Category[] = ['journal', 'task', 'idea', 'log'];
 
+  // Local state ensures immediate visual update on tap — not dependent on parent re-render timing
+  const [selectedCategory, setSelectedCategory] = useState<Category>(piece.category);
+
+  const handleCategoryClick = (cat: Category) => {
+    setSelectedCategory(cat);
+    onCategoryChange(cat);
+  };
+
   return (
     <div className={`bg-card border border-border/50 rounded-2xl p-4 transition-opacity duration-200 ${!piece.accepted ? 'opacity-40' : ''}`}>
       {/* Text + accepted toggle */}
@@ -473,14 +500,14 @@ function SplitPieceCard({
         </button>
       </div>
 
-      {/* Category picker */}
+      {/* Category picker — selectedCategory drives highlight; onCategoryChange keeps parent in sync */}
       <div className="flex gap-1.5 flex-wrap mb-3">
         {categories.map(cat => (
           <button
             key={cat}
-            onClick={() => onCategoryChange(cat)}
+            onClick={() => handleCategoryClick(cat)}
             className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-colors ${
-              piece.category === cat
+              selectedCategory === cat
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-secondary text-muted-foreground hover:bg-secondary/80'
             }`}
