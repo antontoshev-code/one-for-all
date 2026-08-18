@@ -16,5 +16,21 @@ export interface Person {
      * @nullable
      */
   descriptor?: string | null;
+  /** Alternate spellings this person is known by, e.g. "Petja" or "Петя" for "Petya". Mention detection matches against name and aliases. */
+  aliases: string[];
+  /**
+     * Free text so partial birthdays ("October") are possible, not just full dates
+     * @nullable
+     */
+  birthday?: string | null;
+  /** @nullable */
+  countryOfOrigin?: string | null;
+  /**
+     * Left blank when the person still lives where they are from
+     * @nullable
+     */
+  countryOfResidence?: string | null;
+  /** @nullable */
+  howWeMet?: string | null;
   createdAt: Date;
 }

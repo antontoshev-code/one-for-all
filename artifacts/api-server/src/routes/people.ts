@@ -30,7 +30,16 @@ router.post("/people", async (req, res): Promise<void> => {
 
   const [person] = await db
     .insert(peopleTable)
-    .values({ name: parsed.data.name, notes: parsed.data.notes ?? null, descriptor: parsed.data.descriptor ?? null })
+    .values({
+      name: parsed.data.name,
+      notes: parsed.data.notes ?? null,
+      descriptor: parsed.data.descriptor ?? null,
+      aliases: parsed.data.aliases ?? [],
+      birthday: parsed.data.birthday ?? null,
+      countryOfOrigin: parsed.data.countryOfOrigin ?? null,
+      countryOfResidence: parsed.data.countryOfResidence ?? null,
+      howWeMet: parsed.data.howWeMet ?? null,
+    })
     .returning();
 
   res.status(201).json(person);
@@ -85,10 +94,32 @@ router.patch("/people/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  // Text fields use `|| null` so clearing a field in the UI (which sends "")
+  // stores NULL rather than an empty string. `aliases` is exempt: [] is a
+  // meaningful value (no aliases) and must not collapse to NULL, since the
+  // column is NOT NULL.
   const updates: Partial<typeof peopleTable.$inferInsert> = {};
   if (parsed.data.name != null) updates.name = parsed.data.name;
   if (parsed.data.notes != null) updates.notes = parsed.data.notes;
   if (parsed.data.descriptor !== undefined) updates.descriptor = parsed.data.descriptor || null;
+  if (parsed.data.aliases !== undefined) {
+    // Trim, drop blanks, and de-duplicate case-insensitively so repeated
+    // confirmations of the same misspelling don't stack up.
+    const seen = new Set<string>();
+    updates.aliases = parsed.data.aliases
+      .map((a) => a.trim())
+      .filter((a) => {
+        if (!a) return false;
+        const key = a.toLocaleLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+  if (parsed.data.birthday !== undefined) updates.birthday = parsed.data.birthday || null;
+  if (parsed.data.countryOfOrigin !== undefined) updates.countryOfOrigin = parsed.data.countryOfOrigin || null;
+  if (parsed.data.countryOfResidence !== undefined) updates.countryOfResidence = parsed.data.countryOfResidence || null;
+  if (parsed.data.howWeMet !== undefined) updates.howWeMet = parsed.data.howWeMet || null;
 
   const [person] = await db
     .update(peopleTable)

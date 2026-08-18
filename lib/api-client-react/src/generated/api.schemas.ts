@@ -67,6 +67,22 @@ export interface Person {
      * @nullable
      */
   descriptor?: string | null;
+  /** Alternate spellings this person is known by, e.g. "Petja" or "Петя" for "Petya". Mention detection matches against name and aliases. */
+  aliases: string[];
+  /**
+     * Free text so partial birthdays ("October") are possible, not just full dates
+     * @nullable
+     */
+  birthday?: string | null;
+  /** @nullable */
+  countryOfOrigin?: string | null;
+  /**
+     * Left blank when the person still lives where they are from
+     * @nullable
+     */
+  countryOfResidence?: string | null;
+  /** @nullable */
+  howWeMet?: string | null;
   createdAt: string;
 }
 
@@ -163,6 +179,11 @@ export interface PersonInput {
   notes?: string;
   /** Optional short label to distinguish same-named people */
   descriptor?: string;
+  aliases?: string[];
+  birthday?: string;
+  countryOfOrigin?: string;
+  countryOfResidence?: string;
+  howWeMet?: string;
 }
 
 export interface PersonUpdate {
@@ -171,6 +192,11 @@ export interface PersonUpdate {
   notes?: string;
   /** Optional short label to distinguish same-named people */
   descriptor?: string;
+  aliases?: string[];
+  birthday?: string;
+  countryOfOrigin?: string;
+  countryOfResidence?: string;
+  howWeMet?: string;
 }
 
 export type ListEntriesParams = {

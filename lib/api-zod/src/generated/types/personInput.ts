@@ -12,4 +12,9 @@ export interface PersonInput {
   notes?: string;
   /** Optional short label to distinguish same-named people */
   descriptor?: string;
+  aliases?: string[];
+  birthday?: string;
+  countryOfOrigin?: string;
+  countryOfResidence?: string;
+  howWeMet?: string;
 }
