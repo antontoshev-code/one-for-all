@@ -93,14 +93,47 @@ router.post("/ai/transcribe", aiRateLimit, upload.single("audio"), async (req, r
       type: req.file.mimetype || "audio/webm",
     });
 
+    // verbose_json rather than text: it returns per-segment `no_speech_prob`,
+    // which is the only reliable way to tell real speech from Whisper
+    // hallucinating over silence. Given silence the model does not return an
+    // empty string — it emits memorised training fragments (Korean news
+    // sign-offs, "thanks for watching"), which in a diary is worse than
+    // returning nothing at all.
     const result = await openai.audio.transcriptions.create({
       file: audioFile,
       model: "whisper-1",
-      response_format: "text",
+      response_format: "verbose_json",
+      temperature: 0,
     });
 
-    const transcript = typeof result === "string" ? result.trim() : "";
-    return res.json({ transcript, source: "whisper" });
+    const verbose = result as unknown as {
+      text?: string;
+      duration?: number;
+      segments?: { no_speech_prob?: number; avg_logprob?: number }[];
+    };
+
+    const transcript = (verbose.text ?? "").trim();
+    const segments = verbose.segments ?? [];
+
+    // Too short to contain a real thought — almost certainly a mis-tap.
+    if ((verbose.duration ?? 0) < 0.6) {
+      return res.json({ transcript: "", source: "no-speech" });
+    }
+
+    if (transcript && segments.length > 0) {
+      // Whisper is confident about silence when no_speech_prob is high, and
+      // hallucinated text additionally tends to score a poor avg_logprob.
+      // Requiring both keeps genuine quiet speech from being discarded.
+      const likelySilence = segments.every(
+        s => (s.no_speech_prob ?? 0) > 0.6 && (s.avg_logprob ?? 0) < -0.4,
+      );
+      if (likelySilence) {
+        logger.info({ transcript }, "Discarded probable Whisper hallucination over silence");
+        return res.json({ transcript: "", source: "no-speech" });
+      }
+    }
+
+    return res.json({ transcript, source: transcript ? "whisper" : "no-speech" });
   } catch (err) {
     logger.error({ err }, "Whisper transcription failed");
     return res.json({ transcript: "", source: "error", reason: String(err) });

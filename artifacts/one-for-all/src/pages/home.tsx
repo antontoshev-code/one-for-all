@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-type TranscriptBadge = "real" | "unavailable";
+type TranscriptBadge = "real" | "no-speech" | "unavailable";
 
 // Browser-native speech recognition (Chrome, Edge, Safari 15+)
 // Minimal type shim — not in all tsconfig libs
@@ -114,13 +114,18 @@ export default function Home() {
         if (result.source === "whisper" && result.transcript) {
           setContent(result.transcript);
           setTranscriptBadge("real");
+        } else if (result.source === "no-speech") {
+          // Nothing audible. Say so plainly rather than blaming transcription —
+          // the recording worked, there was just nothing in it.
+          setContent("");
+          setTranscriptBadge("no-speech");
         } else {
           setContent("");
           setTranscriptBadge("unavailable");
         }
       } else {
         setContent("");
-        setTranscriptBadge("unavailable");
+        setTranscriptBadge("no-speech");
       }
       setMode("editing");
     };
@@ -385,6 +390,12 @@ export default function Home() {
                   <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-secondary-foreground rounded-full text-sm self-start">
                     <Sparkles className="w-4 h-4 text-primary" />
                     <span>Real transcript — edit before saving</span>
+                  </div>
+                )}
+                {transcriptBadge === "no-speech" && (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-muted-foreground rounded-full text-sm self-start">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>Didn't catch any speech — type your note instead</span>
                   </div>
                 )}
                 {transcriptBadge === "unavailable" && (

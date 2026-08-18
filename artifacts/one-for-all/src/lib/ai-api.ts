@@ -13,7 +13,13 @@ function isCategory(v: unknown): v is Category {
 
 // ── Transcription ──────────────────────────────────────────────────────────
 
-export type TranscriptSource = "whisper" | "unavailable" | "error";
+/**
+ * 'no-speech' means the recording contained no speech the server was willing
+ * to trust. It is distinct from 'unavailable'/'error': transcription worked,
+ * there was simply nothing to hear. Whisper invents plausible-sounding text
+ * when given silence, so the server discards those rather than passing them on.
+ */
+export type TranscriptSource = "whisper" | "no-speech" | "unavailable" | "error";
 
 export interface TranscriptResult {
   transcript: string;
