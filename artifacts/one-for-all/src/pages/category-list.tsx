@@ -15,6 +15,8 @@ import {
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { logEvent } from "@/lib/analytics";
+import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 
 // ── Per-category copy ─────────────────────────────────────────────────────
 
@@ -52,6 +54,7 @@ export default function CategoryList({ category, title, description }: CategoryL
   const updateEntry = useUpdateEntry();
   const deleteEntry = useDeleteEntry();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -60,7 +63,16 @@ export default function CategoryList({ category, title, description }: CategoryL
 
   const empty = EMPTY_MESSAGES[category] ?? { headline: "Nothing here yet", sub: "" };
 
-  const toggleTask = (id: number, isDone: boolean) => {
+  /**
+   * Toggle a task, with a way back.
+   *
+   * A ticked task leaves the list, so a mis-tap costs you the item and the
+   * hunt to find it again. Undo is offered here and not on delete for an
+   * honest reason: this is a field flip and is genuinely reversible, whereas a
+   * deleted entry is gone from the database and "undo" would only ever be a
+   * different entry wearing its text. Delete keeps its confirmation instead.
+   */
+  const toggleTask = (id: number, isDone: boolean, options?: { silent?: boolean }) => {
     updateEntry.mutate(
       { id, data: { isTaskDone: isDone } },
       {
@@ -68,6 +80,21 @@ export default function CategoryList({ category, title, description }: CategoryL
           queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category }) });
           // Invalidate stats so Home task count stays accurate
           queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
+
+          // The undo itself must not offer its own undo, or the toast never ends.
+          if (options?.silent) return;
+
+          toast({
+            title: isDone ? "Task completed" : "Task reopened",
+            action: (
+              <ToastAction
+                altText="Undo"
+                onClick={() => toggleTask(id, !isDone, { silent: true })}
+              >
+                Undo
+              </ToastAction>
+            ),
+          });
         },
       },
     );
