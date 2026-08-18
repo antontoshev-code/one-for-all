@@ -1,4 +1,5 @@
 import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { userTable } from "./auth";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -23,6 +24,13 @@ export const peopleTable = pgTable("people", {
 
   howWeMet: text("how_we_met"),
 
+
+  /**
+   * Owner. Nullable only so existing rows survive the migration — every row
+   * written after auth landed has one. The first account created claims the
+   * orphans (see claimOrphanedRows), after which nothing should be NULL.
+   */
+  userId: text("user_id").references(() => userTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

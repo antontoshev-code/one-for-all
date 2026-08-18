@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -20,6 +20,9 @@ import PersonDetail from '@/pages/person-detail';
 import Settings from '@/pages/settings';
 import History from '@/pages/history';
 import { AppNav } from '@/components/app-nav';
+import Login from '@/pages/login';
+import { getSession, type AuthUser } from '@/lib/auth-client';
+import { Loader2 } from 'lucide-react';
 
 const queryClient = new QueryClient();
 
@@ -59,6 +62,34 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
 }
 
+/**
+ * Gates the app on a session.
+ *
+ * Every content route is 401 without one, so rendering the app first would
+ * just flash a screen of failed requests. `user === undefined` means "not
+ * checked yet" and is distinct from `null` ("checked, signed out") — without
+ * that distinction the login form flashes on every refresh before the session
+ * resolves.
+ */
+function AuthGate({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
+
+  const refresh = () => { void getSession().then(setUser); };
+  useEffect(refresh, []);
+
+  if (user === undefined) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (user === null) return <Login onSignedIn={refresh} />;
+
+  return <>{children}</>;
+}
+
 function App() {
   return (
     <ThemeProvider
@@ -69,9 +100,11 @@ function App() {
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-            <Router />
-          </WouterRouter>
+          <AuthGate>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+              <Router />
+            </WouterRouter>
+          </AuthGate>
           <Toaster />
         </TooltipProvider>
       </QueryClientProvider>

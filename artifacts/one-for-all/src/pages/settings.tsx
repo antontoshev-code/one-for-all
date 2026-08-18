@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
+import { signOut } from "@/lib/auth-client";
 import {
   Trash2, AlertTriangle, Info, Loader2, Download,
   Shield, Mic, Sparkles, CheckCircle2, XCircle,
-  Palette, Sun, Moon, Monitor,
+  Palette, Sun, Moon, Monitor, LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logEvent } from "@/lib/analytics";
@@ -272,6 +273,32 @@ export default function Settings() {
               ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               : <Download className="w-4 h-4 mr-2" />}
             {isExporting ? "Preparing download…" : "Download export"}
+          </Button>
+        </section>
+
+        {/* ── Account ─────────────────────────────────────────────────────── */}
+        <section className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <LogOut className="w-5 h-5 text-primary shrink-0" />
+            <h2 className="text-base font-semibold">Account</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+            Your entries are private to your account. Signing out leaves them
+            untouched — they're waiting when you sign back in.
+          </p>
+          <Button
+            variant="outline"
+            className="rounded-full w-full"
+            onClick={async () => {
+              await signOut();
+              // Full reload rather than a state reset: it clears React Query's
+              // cache too, so no fragment of the previous session's data can
+              // survive into the next one.
+              window.location.href = "/";
+            }}
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Sign out
           </Button>
         </section>
 

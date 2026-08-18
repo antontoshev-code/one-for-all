@@ -1,17 +1,17 @@
 import { Router } from "express";
-import { eq, sql } from "drizzle-orm";
-import { db, capturesTable, captureEntriesTable, entriesTable, entryPeopleTable, peopleTable } from "@workspace/db";
+import { eq, and, sql, db, capturesTable, captureEntriesTable, entriesTable, entryPeopleTable, peopleTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 const router = Router();
 
 // ── GET /captures — full history, newest first ─────────────────────────────
 
-router.get("/captures", async (_req, res): Promise<void> => {
+router.get("/captures", async (req, res): Promise<void> => {
   try {
     const captures = await db
       .select()
       .from(capturesTable)
+      .where(eq(capturesTable.userId, req.userId))
       .orderBy(sql`${capturesTable.createdAt} desc`);
 
     const result = await Promise.all(
@@ -35,7 +35,7 @@ router.get("/captures", async (_req, res): Promise<void> => {
             const [entry] = await db
               .select()
               .from(entriesTable)
-              .where(eq(entriesTable.id, link.entryId));
+              .where(and(eq(entriesTable.id, link.entryId), eq(entriesTable.userId, req.userId)));
 
             const personRows = await db
               .select({ id: peopleTable.id, name: peopleTable.name })
@@ -87,6 +87,7 @@ router.post("/captures", async (req, res): Promise<void> => {
     const [capture] = await db
       .insert(capturesTable)
       .values({
+        userId: req.userId,
         content: content.trim(),
         captureType: captureType as "voice" | "text",
       })
