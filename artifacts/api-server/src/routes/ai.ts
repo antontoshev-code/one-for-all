@@ -49,7 +49,10 @@ function heuristicCategory(text: string): Category {
   return "journal";
 }
 
-// ── Multer (audio upload, memory storage, 25 MB limit) ───────────────────
+// ── Multer (audio upload, memory storage) ────────────────────────────────
+// memoryStorage, never disk: the recording exists only for the life of the
+// request, is streamed to Whisper, and is then garbage collected. Nothing to
+// clean up, and nothing left behind if the process dies mid-request.
 
 const upload = multer({
   storage: multer.memoryStorage(),

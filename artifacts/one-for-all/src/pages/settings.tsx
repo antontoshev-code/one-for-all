@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { logEvent } from "@/lib/analytics";
+import { Link } from "wouter";
 
 // ── AI Status ─────────────────────────────────────────────────────────────
 
@@ -342,6 +343,11 @@ export default function Settings() {
             <p>
               <strong className="text-foreground">Your control:</strong>{" "}
               You can export all your data or delete everything below, at any time.
+            </p>
+            <p className="pt-1">
+              <Link href="/privacy" className="text-primary font-medium hover:underline">
+                Read the full privacy policy
+              </Link>
             </p>
           </div>
         </section>

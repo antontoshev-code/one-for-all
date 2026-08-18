@@ -3,6 +3,7 @@ import { Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { signIn, signUp, signInWithGoogle } from "@/lib/auth-client";
+import { Link } from "wouter";
 
 type Mode = "signin" | "signup";
 
@@ -138,6 +139,11 @@ export default function Login({ onSignedIn }: { onSignedIn: () => void }) {
             Continue with Google
           </Button>
         </div>
+
+        <p className="text-center text-xs text-muted-foreground mt-5">
+          Your entries are private to you. Read the{" "}
+          <Link href="/privacy" className="underline hover:text-foreground">privacy policy</Link>.
+        </p>
 
         <p className="text-center text-sm text-muted-foreground mt-5">
           {isSignUp ? "Already have an account?" : "No account yet?"}{" "}

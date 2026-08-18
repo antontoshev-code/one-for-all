@@ -18,6 +18,7 @@ import CategoryList from '@/pages/category-list';
 import People from '@/pages/people';
 import PersonDetail from '@/pages/person-detail';
 import Settings from '@/pages/settings';
+import Privacy from '@/pages/privacy';
 import History from '@/pages/history';
 import { AppNav } from '@/components/app-nav';
 import Login from '@/pages/login';
@@ -26,7 +27,21 @@ import { Loader2 } from 'lucide-react';
 
 const queryClient = new QueryClient();
 
+/**
+ * Routes that must render without a session.
+ *
+ * The privacy policy is linked from the login screen, so gating it would mean
+ * the only way to read what the app does with your data is to first hand it
+ * some. It contains nothing personal, so there is nothing to protect.
+ */
+const PUBLIC_PATHS = ['/privacy'];
+
 function Router() {
+  const [location] = useLocation();
+  // The nav loads entry counts, which 401 without a session. On a public page
+  // that means a pointless failing request and a nav to places you can't go.
+  const showNav = !PUBLIC_PATHS.includes(location);
+
   return (
     <RoutedErrorBoundary>
       <div className="relative min-h-screen bg-background text-foreground selection:bg-primary/20 selection:text-primary">
@@ -49,9 +64,10 @@ function Router() {
           <Route path="/people/:id" component={PersonDetail} />
           <Route path="/history" component={History} />
           <Route path="/settings" component={Settings} />
+          <Route path="/privacy" component={Privacy} />
           <Route component={NotFound} />
         </Switch>
-        <AppNav />
+        {showNav && <AppNav />}
       </div>
     </RoutedErrorBoundary>
   );
@@ -71,11 +87,15 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
  * that distinction the login form flashes on every refresh before the session
  * resolves.
  */
+
 function AuthGate({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
+  const [location] = useLocation();
 
   const refresh = () => { void getSession().then(setUser); };
   useEffect(refresh, []);
+
+  if (PUBLIC_PATHS.includes(location)) return <>{children}</>;
 
   if (user === undefined) {
     return (
@@ -100,11 +120,14 @@ function App() {
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <AuthGate>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+          {/* AuthGate sits inside the Router so the location it reads is
+              base-relative — BASE_PATH is configurable, and comparing a
+              base-prefixed path against '/privacy' would never match. */}
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+            <AuthGate>
               <Router />
-            </WouterRouter>
-          </AuthGate>
+            </AuthGate>
+          </WouterRouter>
           <Toaster />
         </TooltipProvider>
       </QueryClientProvider>
