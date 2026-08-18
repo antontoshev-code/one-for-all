@@ -34,6 +34,13 @@ import { categorizeTexts, detectPersonNames } from "@/lib/ai-api";
 
 type Category = 'journal' | 'task' | 'idea' | 'log';
 
+const CATEGORY_SUBTITLES: Record<Category, string> = {
+  journal: 'thoughts & reflections',
+  task: 'something to do',
+  idea: 'a concept to explore',
+  log: 'body, health & workouts',
+};
+
 interface SplitPiece {
   text: string;
   category: Category;
@@ -133,7 +140,23 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   // ── Single-category actions ──────────────────────────────────────────────
 
   const handleProcess = (category: Category | 'inbox') => {
-    updateEntry.mutate({ id: entry.id, data: { category } }, { onSuccess: invalidateAll });
+    updateEntry.mutate({ id: entry.id, data: { category } }, {
+      onSuccess: () => {
+        // Record for History (fire-and-forget — not on critical path)
+        if (category !== 'inbox') {
+          fetch('/api/captures', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              content: entry.content,
+              captureType: entry.captureType,
+              entries: [{ entryId: entry.id, category }],
+            }),
+          }).catch(err => console.warn('[History] Failed to record capture', err));
+        }
+        invalidateAll();
+      },
+    });
   };
 
   // ── Link person popover actions ──────────────────────────────────────────
@@ -246,6 +269,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     confirmingRef.current = true;        // set before first await
     setIsConfirming(true);
     try {
+      const createdEntries: { entryId: number; category: string }[] = [];
+
       for (const piece of accepted) {
         let personId = piece.linkedPersonId;
 
@@ -272,11 +297,24 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
           }
         });
 
+        createdEntries.push({ entryId: newEntry.id, category: piece.category });
+
         // Link person if we have one
         if (personId) {
           await linkPerson.mutateAsync({ id: newEntry.id, data: { personId } });
         }
       }
+
+      // Record original capture for History before deleting it (fire-and-forget)
+      fetch('/api/captures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: entry.content,
+          captureType: entry.captureType,
+          entries: createdEntries,
+        }),
+      }).catch(err => console.warn('[History] Failed to record capture', err));
 
       // Remove original from inbox — must happen before closing overlay
       await deleteEntry.mutateAsync({ id: entry.id });
@@ -387,24 +425,25 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
       <p className="text-foreground text-lg leading-relaxed mb-6">{entry.content}</p>
 
       {isChangingCat ? (
-        <div className="bg-secondary/50 rounded-2xl p-2 flex gap-2 overflow-x-auto no-scrollbar">
-          {(['journal', 'task', 'idea', 'log'] as Category[]).map((cat) => (
-            <Button
-              key={cat}
-              variant="secondary"
-              size="sm"
-              className="rounded-full bg-background"
-              onClick={() => {
-                logEvent('suggestion_rejected', { suggested: suggestedCat, chosen: cat, entryId: entry.id });
-                handleProcess(cat);
-                setIsChangingCat(false);
-              }}
-            >
-              {cat}
-            </Button>
-          ))}
-          <Button variant="ghost" size="icon" className="rounded-full shrink-0" onClick={() => setIsChangingCat(false)}>
-            <X className="w-4 h-4" />
+        <div>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            {(['journal', 'task', 'idea', 'log'] as Category[]).map((cat) => (
+              <button
+                key={cat}
+                className="flex flex-col items-start text-left rounded-2xl bg-card border border-border/50 px-3 py-2.5 hover:bg-accent/40 active:bg-accent/60 transition-colors"
+                onClick={() => {
+                  logEvent('suggestion_rejected', { suggested: suggestedCat, chosen: cat, entryId: entry.id });
+                  handleProcess(cat);
+                  setIsChangingCat(false);
+                }}
+              >
+                <span className="text-sm font-semibold capitalize">{cat}</span>
+                <span className="text-[10px] text-muted-foreground leading-tight">{CATEGORY_SUBTITLES[cat]}</span>
+              </button>
+            ))}
+          </div>
+          <Button variant="ghost" size="sm" className="rounded-full w-full text-muted-foreground text-xs" onClick={() => setIsChangingCat(false)}>
+            Cancel
           </Button>
         </div>
       ) : (
@@ -588,19 +627,24 @@ function SplitPieceCard({
         </button>
       </div>
 
-      {/* Category picker — selectedCategory drives highlight; onCategoryChange keeps parent in sync */}
-      <div className="flex gap-1.5 flex-wrap mb-3">
+      {/* Category picker */}
+      <div className="grid grid-cols-4 gap-1.5 mb-3">
         {categories.map(cat => (
           <button
             key={cat}
             onClick={() => handleCategoryClick(cat)}
-            className={`px-3 py-1 rounded-full text-xs font-medium capitalize transition-colors ${
+            className={`flex flex-col items-center py-2 rounded-xl text-xs font-medium capitalize transition-colors ${
               selectedCategory === cat
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-secondary text-muted-foreground hover:bg-secondary/80'
             }`}
           >
-            {cat}
+            <span className="font-semibold capitalize">{cat}</span>
+            <span className={`text-[8px] leading-tight mt-0.5 text-center px-0.5 ${
+              selectedCategory === cat ? 'text-primary-foreground/70' : 'text-muted-foreground/60'
+            }`}>
+              {CATEGORY_SUBTITLES[cat]}
+            </span>
           </button>
         ))}
       </div>

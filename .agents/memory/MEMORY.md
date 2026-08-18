@@ -1,1 +1,2 @@
 - [Orval zod.int() on Zod v3](orval-zod-int-patch.md) — Orval v8 generates zod.int() (Zod v4 only); patch codegen script with sed when workspace uses Zod v3.
+- [History captures table](history-captures.md) — captures + capture_entries track original voice/text before splitting; clear-all deletes them; Log = body/health only.

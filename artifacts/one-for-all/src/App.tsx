@@ -17,6 +17,7 @@ import CategoryList from '@/pages/category-list';
 import People from '@/pages/people';
 import PersonDetail from '@/pages/person-detail';
 import Settings from '@/pages/settings';
+import History from '@/pages/history';
 import { AppNav } from '@/components/app-nav';
 
 const queryClient = new QueryClient();
@@ -42,6 +43,7 @@ function Router() {
           </Route>
           <Route path="/people" component={People} />
           <Route path="/people/:id" component={PersonDetail} />
+          <Route path="/history" component={History} />
           <Route path="/settings" component={Settings} />
           <Route component={NotFound} />
         </Switch>

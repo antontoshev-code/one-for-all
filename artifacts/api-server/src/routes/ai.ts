@@ -11,6 +11,8 @@ const VALID_CATEGORIES: Category[] = ["journal", "task", "idea", "log"];
 
 // ── Heuristic fallback (mirrors frontend heuristics.ts) ───────────────────
 
+// Log = SPECIFICALLY body / health / physical tracking.
+// General daily-life activities default to journal.
 function heuristicCategory(text: string): Category {
   const t = text.toLowerCase();
   if (
@@ -24,9 +26,16 @@ function heuristicCategory(text: string): Category {
       "i want to", "i think i want"].some(w => t.includes(w))
   ) return "idea";
   if (
-    ["did", "went", "finished", "completed", "ran", "worked out", "workout",
-      "ate", "cooked", "watched", "read", "picked up", "got", "had", "met",
-      "saw", "visited"].some(w => t.includes(w))
+    ["workout", "worked out", "exercise", "exercised", "training",
+      "ran ", "running", "jogged", "jogging", "sprinted", "cycling", "swam",
+      "lifted", "gym", "pull-up", "push-up", "bench press", "squat", "deadlift", "reps",
+      "slept", "sleep", "woke up", "fatigue",
+      "ate ", "eating", "meal", "breakfast", "lunch", "dinner", "calories", "fasting",
+      "weight ", "weighed", "bmi",
+      "heart rate", "pulse", "blood pressure", "steps taken",
+      "headache", "stomachache", "pain", "sore", "symptom", "sick", "fever", "nausea",
+      "medication", "vitamins", "supplements",
+    ].some(w => t.includes(w))
   ) return "log";
   return "journal";
 }
@@ -130,10 +139,10 @@ router.post("/ai/categorize", async (req, res) => {
       ],
       tool_choice: { type: "tool", name: "categorize_texts" },
       system: `You are a personal journaling assistant. Classify each snippet into exactly one category:
-- journal: personal reflections, feelings, observations, recollections
-- task: action items, reminders, things to do (call, buy, schedule, remember to)
-- idea: creative thoughts, concepts, what-if proposals, something to build or try
-- log: factual records of already-completed events (went, finished, ran, ate, watched, met)`,
+- journal: personal reflections, feelings, daily thoughts, observations, general activities, weather, social events, and anything not better captured below — this is the default for everyday narrative
+- task: action items, reminders, things the user needs to do (call, buy, schedule, remember to, must, should)
+- idea: creative thoughts, concepts, what-if proposals, something to build, explore, or try
+- log: ONLY body / health / physical tracking — workouts, sleep, eating, physical symptoms, pain, medication, weight, heart rate; do NOT use log for general activities like "went to a store" or "spent time outside"`,
       messages: [
         {
           role: "user",

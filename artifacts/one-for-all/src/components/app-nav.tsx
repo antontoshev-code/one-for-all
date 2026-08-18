@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Home, Inbox, Book, CheckSquare, MoreHorizontal, Lightbulb, Activity, Users, Settings } from "lucide-react";
+import { Home, Inbox, Book, CheckSquare, MoreHorizontal, Lightbulb, Activity, Users, Settings, Clock } from "lucide-react";
 import { useGetEntryStats } from "@workspace/api-client-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ export function AppNav() {
     { href: "/ideas", label: "Ideas", icon: Lightbulb },
     { href: "/log", label: "Log", icon: Activity },
     { href: "/people", label: "People", icon: Users },
+    { href: "/history", label: "History", icon: Clock },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
 
