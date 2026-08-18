@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle } from "lucide-react";
-import { getMockTranscript } from "@/lib/heuristics";
 import { transcribeAudio } from "@/lib/ai-api";
 import { logEvent } from "@/lib/analytics";
 import { useToast } from "@/hooks/use-toast";
@@ -10,7 +9,26 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-type TranscriptBadge = "real" | "mock" | "unavailable";
+type TranscriptBadge = "real" | "unavailable";
+
+// Browser-native speech recognition (Chrome, Edge, Safari 15+)
+// Minimal type shim — not in all tsconfig libs
+interface WebSpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { resultIndex: number; results: { isFinal: boolean; 0: { transcript: string } }[] }) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+type WebSpeechRecognitionCtor = new () => WebSpeechRecognition;
+const SpeechRecognitionAPI: WebSpeechRecognitionCtor | null =
+  (typeof window !== "undefined" &&
+    ((window as unknown as { SpeechRecognition?: WebSpeechRecognitionCtor }).SpeechRecognition ||
+     (window as unknown as { webkitSpeechRecognition?: WebSpeechRecognitionCtor }).webkitSpeechRecognition)) ||
+  null;
 
 export default function Home() {
   const [mode, setMode] = useState<"idle" | "recording" | "transcribing" | "editing" | "text">("idle");
@@ -27,6 +45,17 @@ export default function Home() {
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
+  const webSpeechRef = useRef<WebSpeechRecognition | null>(null);
+  // Set to true when Web Speech produces a non-empty transcript — tells
+  // MediaRecorder.onstop to skip Whisper.
+  const webSpeechSucceeded = useRef(false);
+  // Set to true when the user explicitly clicks Stop (vs Web Speech auto-stopping).
+  const stoppedByUser = useRef(false);
+  // Safety timer: stops MediaRecorder if recognition.onend never fires.
+  const webSpeechSafetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic counter — incremented on each new recording so a late Whisper
+  // response from a previous session cannot clobber the current UI.
+  const recordingSession = useRef(0);
   const [, setLocation] = useLocation();
   const createEntry = useCreateEntry();
   const { data: stats } = useGetEntryStats();
@@ -41,59 +70,183 @@ export default function Home() {
   }, [mode]);
 
   // ── Recording ─────────────────────────────────────────────────────────────
+  //
+  // Approach — race-free Web Speech + Whisper coordination:
+  //
+  // MediaRecorder always runs so audio is captured. Web Speech runs in parallel
+  // as a free/instant enhancement. Crucially, MediaRecorder is NEVER stopped
+  // from handleStopRecording when Web Speech is active — only recognition.onend
+  // can stop it, after the success/failure decision is made. This eliminates
+  // the race where onstop fires before onend.
+  //
+  //  handleStopRecording (user clicks stop)
+  //    ├── Web Speech active? → stop recognition only; set safety timer
+  //    │     recognition.onend fires (guaranteed before MediaRecorder.onstop)
+  //    │       ├── transcript OK → set webSpeechSucceeded, update UI, stop recorder
+  //    │       │     recorder.onstop → sees flag → releases tracks, returns
+  //    │       └── empty/error   → stop recorder
+  //    │             recorder.onstop → runs Whisper, updates UI
+  //    └── Web Speech NOT active → stop recorder directly
+  //          recorder.onstop → runs Whisper (or unavailable)
 
-  const doTranscription = async (blob: Blob) => {
-    const result = await transcribeAudio(blob);
-    if (result.source === "whisper" && result.transcript) {
-      setContent(result.transcript);
-      setTranscriptBadge("real");
-    } else if (result.source === "unavailable") {
-      setContent(getMockTranscript());
-      setTranscriptBadge("unavailable");
-    } else {
-      setContent(getMockTranscript());
-      setTranscriptBadge("mock");
-    }
-    setMode("editing");
+  const stopMediaRecorder = (session: number) => {
+    const rec = mediaRecorder.current;
+    if (!rec) return;
+
+    const mimeType = rec.mimeType || "audio/webm";
+
+    rec.onstop = async () => {
+      // Release mic tracks regardless of outcome
+      rec.stream?.getTracks().forEach(t => t.stop());
+
+      if (webSpeechSucceeded.current) return; // Web Speech already handled UI
+
+      // Guard: discard if a newer recording started while Whisper was in-flight
+      if (recordingSession.current !== session) return;
+
+      if (audioChunks.current.length > 0) {
+        const blob = new Blob(audioChunks.current, { type: mimeType });
+        const result = await transcribeAudio(blob);
+
+        if (recordingSession.current !== session) return; // stale — discard
+
+        if (result.source === "whisper" && result.transcript) {
+          setContent(result.transcript);
+          setTranscriptBadge("real");
+        } else {
+          setContent("");
+          setTranscriptBadge("unavailable");
+        }
+      } else {
+        setContent("");
+        setTranscriptBadge("unavailable");
+      }
+      setMode("editing");
+    };
+
+    if (rec.state === "recording") rec.stop();
   };
 
   const handleStartRecording = async () => {
+    // Increment session so any in-flight Whisper from a previous recording is ignored
+    const session = ++recordingSession.current;
     audioChunks.current = [];
+    webSpeechRef.current = null;
+    mediaRecorder.current = null;
+    webSpeechSucceeded.current = false;
+    stoppedByUser.current = false;
+    if (webSpeechSafetyTimer.current) clearTimeout(webSpeechSafetyTimer.current);
+
+    // ── Step 1: Get mic access (needed by both paths) ──────────────────────
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunks.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        const mimeType = recorder.mimeType || "audio/webm";
-        const blob = new Blob(audioChunks.current, { type: mimeType });
-        await doTranscription(blob);
-      };
-
-      mediaRecorder.current = recorder;
-      recorder.start();
-      setMode("recording");
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
       console.error("Mic access denied", err);
-      mediaRecorder.current = null;
-      setMode("recording");
+      setContent("");
+      setTranscriptBadge("unavailable");
+      setMode("editing");
+      return;
     }
+
+    // ── Step 2: MediaRecorder — always running, Whisper fallback ──────────
+    const recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.current.push(e.data);
+    };
+    // Note: onstop is assigned by stopMediaRecorder() just before stopping,
+    // so it closes over the correct session ID.
+    mediaRecorder.current = recorder;
+    recorder.start();
+
+    // ── Step 3: Web Speech API — optional parallel enhancement ────────────
+    if (SpeechRecognitionAPI) {
+      try {
+        const recognition = new SpeechRecognitionAPI();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = "en-US";
+
+        const parts: string[] = [];
+        let hadRuntimeError = false;
+
+        recognition.onresult = (event) => {
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              parts.push(event.results[i][0].transcript);
+            }
+          }
+        };
+
+        recognition.onerror = (event) => {
+          console.error("SpeechRecognition error:", event.error);
+          hadRuntimeError = true;
+          // Keep MediaRecorder running — Whisper can use the audio when user stops
+        };
+
+        recognition.onend = () => {
+          webSpeechRef.current = null;
+          if (webSpeechSafetyTimer.current) {
+            clearTimeout(webSpeechSafetyTimer.current);
+            webSpeechSafetyTimer.current = null;
+          }
+
+          if (!stoppedByUser.current) {
+            // Web Speech auto-stopped (e.g. network blip) before user clicked Stop.
+            // Leave MediaRecorder running; user will click Stop manually.
+            return;
+          }
+
+          const transcript = parts.join(" ").trim();
+          if (transcript && !hadRuntimeError) {
+            // Web Speech succeeded — signal stopMediaRecorder's onstop to skip Whisper
+            webSpeechSucceeded.current = true;
+            setContent(transcript);
+            setTranscriptBadge("real");
+            setMode("editing");
+          }
+          // Stop MediaRecorder AFTER this decision is recorded in webSpeechSucceeded.
+          // Its onstop sees the flag and skips Whisper if Web Speech succeeded.
+          stopMediaRecorder(session);
+        };
+
+        // Wrap start() — can throw synchronously on some browsers
+        recognition.start();
+        webSpeechRef.current = recognition;
+      } catch (err) {
+        console.error("SpeechRecognition could not start:", err);
+        // webSpeechRef.current stays null — stopRecording goes straight to MediaRecorder
+      }
+    }
+
+    setMode("recording");
   };
 
   const handleStopRecording = () => {
     setMode("transcribing");
-    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
-      mediaRecorder.current.stop();
-      mediaRecorder.current.stream.getTracks().forEach(t => t.stop());
+    stoppedByUser.current = true;
+
+    if (webSpeechRef.current) {
+      // Stop Web Speech. Its onend will stop MediaRecorder AFTER deciding success/failure.
+      // This guarantees onend always runs before recorder.onstop — no race.
+      webSpeechRef.current.stop();
+
+      // Safety net: if recognition.onend never fires (buggy implementation),
+      // stop MediaRecorder ourselves after 3 s so the UI doesn't hang.
+      const session = recordingSession.current;
+      webSpeechSafetyTimer.current = setTimeout(() => {
+        webSpeechSafetyTimer.current = null;
+        webSpeechRef.current = null;
+        stopMediaRecorder(session);
+      }, 3000);
+    } else if (mediaRecorder.current) {
+      // No Web Speech — go straight to Whisper
+      stopMediaRecorder(recordingSession.current);
     } else {
-      setTimeout(() => {
-        setContent(getMockTranscript());
-        setTranscriptBadge("mock");
-        setMode("editing");
-      }, 800);
+      // Nothing was recording
+      setContent("");
+      setTranscriptBadge("unavailable");
+      setMode("editing");
     }
   };
 
@@ -213,19 +366,13 @@ export default function Home() {
                 {transcriptBadge === "real" && (
                   <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-secondary-foreground rounded-full text-sm self-start">
                     <Sparkles className="w-4 h-4 text-primary" />
-                    <span>Transcript — edit if needed</span>
-                  </div>
-                )}
-                {transcriptBadge === "mock" && (
-                  <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-secondary-foreground rounded-full text-sm self-start">
-                    <Sparkles className="w-4 h-4 text-primary" />
-                    <span>Mock transcript — edit if needed</span>
+                    <span>Real transcript — edit before saving</span>
                   </div>
                 )}
                 {transcriptBadge === "unavailable" && (
                   <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-sm self-start">
                     <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>Transcription unavailable — using placeholder, please edit</span>
+                    <span>Transcription unavailable — please type your note</span>
                   </div>
                 )}
               </>
