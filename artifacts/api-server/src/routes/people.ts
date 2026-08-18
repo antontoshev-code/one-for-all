@@ -30,7 +30,7 @@ router.post("/people", async (req, res): Promise<void> => {
 
   const [person] = await db
     .insert(peopleTable)
-    .values({ name: parsed.data.name, notes: parsed.data.notes ?? null })
+    .values({ name: parsed.data.name, notes: parsed.data.notes ?? null, descriptor: parsed.data.descriptor ?? null })
     .returning();
 
   res.status(201).json(person);
@@ -88,6 +88,7 @@ router.patch("/people/:id", async (req, res): Promise<void> => {
   const updates: Partial<typeof peopleTable.$inferInsert> = {};
   if (parsed.data.name != null) updates.name = parsed.data.name;
   if (parsed.data.notes != null) updates.notes = parsed.data.notes;
+  if (parsed.data.descriptor !== undefined) updates.descriptor = parsed.data.descriptor || null;
 
   const [person] = await db
     .update(peopleTable)

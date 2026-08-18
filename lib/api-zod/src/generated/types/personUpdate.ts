@@ -10,4 +10,6 @@ export interface PersonUpdate {
   /** @minLength 1 */
   name?: string;
   notes?: string;
+  /** Optional short label to distinguish same-named people */
+  descriptor?: string;
 }

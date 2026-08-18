@@ -6,6 +6,7 @@ export const peopleTable = pgTable("people", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   notes: text("notes"),
+  descriptor: text("descriptor"),  // optional short label: "Studentina", "climbing gym", "WWF"
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

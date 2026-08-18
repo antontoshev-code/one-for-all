@@ -117,8 +117,8 @@ export default function People() {
               >
                 <div className="min-w-0">
                   <h3 className="font-semibold text-lg text-foreground truncate">{person.name}</h3>
-                  <p className="text-xs text-muted-foreground mt-1 tracking-wider uppercase font-medium">
-                    Tap to view details
+                  <p className="text-xs text-muted-foreground mt-1 truncate">
+                    {person.descriptor ?? 'Tap to view'}
                   </p>
                 </div>
                 <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors shrink-0 ml-3">

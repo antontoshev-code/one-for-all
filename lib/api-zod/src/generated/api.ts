@@ -95,6 +95,7 @@ export const GetEntryResponse = zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
   "notes": zod.string().nullish(),
+  "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
   "createdAt": zod.coerce.date()
 }))
 }))
@@ -164,6 +165,7 @@ export const LinkPersonToEntryResponse = zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
   "notes": zod.string().nullish(),
+  "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
   "createdAt": zod.coerce.date()
 }))
 }))
@@ -191,6 +193,7 @@ export const UnlinkPersonFromEntryResponse = zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
   "notes": zod.string().nullish(),
+  "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
   "createdAt": zod.coerce.date()
 }))
 }))
@@ -203,6 +206,7 @@ export const ListPeopleResponseItem = zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
   "notes": zod.string().nullish(),
+  "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
   "createdAt": zod.coerce.date()
 })
 export const ListPeopleResponse = zod.array(ListPeopleResponseItem)
@@ -216,13 +220,15 @@ export const ListPeopleResponse = zod.array(ListPeopleResponseItem)
 
 export const CreatePersonBody = zod.object({
   "name": zod.string().min(1),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "descriptor": zod.string().optional().describe('Optional short label to distinguish same-named people')
 })
 
 export const CreatePersonResponse = zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
   "notes": zod.string().nullish(),
+  "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
   "createdAt": zod.coerce.date()
 })
 
@@ -238,6 +244,7 @@ export const GetPersonResponse = zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
   "notes": zod.string().nullish(),
+  "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
   "createdAt": zod.coerce.date()
 }).and(zod.object({
   "entries": zod.array(zod.object({
@@ -265,13 +272,15 @@ export const UpdatePersonParams = zod.object({
 
 export const UpdatePersonBody = zod.object({
   "name": zod.string().min(1).optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "descriptor": zod.string().optional().describe('Optional short label to distinguish same-named people')
 })
 
 export const UpdatePersonResponse = zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
   "notes": zod.string().nullish(),
+  "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
   "createdAt": zod.coerce.date()
 })
 

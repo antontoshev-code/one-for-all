@@ -28,7 +28,7 @@ import {
   detectNamesInChunk,
   type NameDetectionResult,
 } from "@/lib/heuristics";
-import { categorizeTexts, detectPersonNames } from "@/lib/ai-api";
+// categorizeTexts / detectPersonNames no longer needed — replaced by /api/ai/split
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,8 @@ interface SplitPiece {
   nameDetection: NameDetectionResult;
   linkedPersonId: number | null;
   addAsNewPerson: boolean;
+  /** Descriptor typed by user when creating a new person via disambiguation or suggestion */
+  addAsNewPersonDescriptor: string;
 }
 
 // ── Inbox page ────────────────────────────────────────────────────────────
@@ -116,6 +118,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
   // Single-category flow
   const [isChangingCat, setIsChangingCat] = useState(false);
+  // AI-overridden category suggestion (set when split returns 1 unit)
+  const [localSuggestedCat, setLocalSuggestedCat] = useState<Category | null>(null);
   // Skip state
   const [isSkipped, setIsSkipped] = useState(false);
   // Link person popover
@@ -188,69 +192,85 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   // ── Split actions ────────────────────────────────────────────────────────
 
   const handleInitSplit = async () => {
-    const chunks = splitIntoChunks(entry.content);
-    if (chunks.length === 0) return;
+    if (!entry.content?.trim()) return;
     setIsSplitLoading(true);
 
-    try {
-      // Run AI categorization and AI name detection in parallel
-      const [catResult, namesResult] = await Promise.allSettled([
-        categorizeTexts(chunks),
-        detectPersonNames(chunks),
-      ]);
-
-      const categories = catResult.status === 'fulfilled'
-        ? catResult.value.categories
-        : chunks.map(t => categorizeContent(t));
-
-      const aiNames = namesResult.status === 'fulfilled'
-        ? namesResult.value.names
-        : null;
-
-      const pieces: SplitPiece[] = chunks.map((text, i) => {
-        // For name detection: if AI returned a name, resolve against existing people;
-        // otherwise fall back to the keyword-based heuristic.
-        let nameDetection: NameDetectionResult;
-        const aiName = aiNames?.[i];
-        if (aiName) {
-          const matched = (people || []).find(p => {
-            const fn = p.name.split(' ')[0].toLowerCase();
-            return (
-              p.name.toLowerCase() === aiName.toLowerCase() ||
-              fn === aiName.toLowerCase().split(' ')[0]
-            );
-          });
-          nameDetection = matched
-            ? { matchedPerson: matched }
-            : { suggestedName: aiName };
-        } else {
-          nameDetection = detectNamesInChunk(text, people || []);
-        }
-
-        return {
-          text,
-          category: categories[i] ?? categorizeContent(text),
-          accepted: true,
-          nameDetection,
-          linkedPersonId: null,
-          addAsNewPerson: false,
-        };
-      });
-
-      setSplitPieces(pieces);
-      setSplitMode('reviewing');
-    } catch {
-      // Complete failure — build pieces with heuristics
-      const pieces: SplitPiece[] = chunks.map(text => ({
+    const makeFallbackPieces = () => {
+      const chunks = splitIntoChunks(entry.content);
+      return chunks.map(text => ({
         text,
         category: categorizeContent(text),
         accepted: true,
         nameDetection: detectNamesInChunk(text, people || []),
         linkedPersonId: null,
         addAsNewPerson: false,
+        addAsNewPersonDescriptor: '',
       }));
+    };
+
+    try {
+      const res = await fetch('/api/ai/split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: entry.content }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json() as {
+        units: Array<{ text: string; category: string; people: string[] }>;
+        source: 'claude' | 'heuristic';
+      };
+
+      if (!data.units || data.units.length === 0) throw new Error('empty response');
+
+      if (data.units.length === 1) {
+        // Single unified thought — stay in single-category flow with AI's category
+        setLocalSuggestedCat(data.units[0].category as Category);
+        setIsSplitLoading(false);
+        return;
+      }
+
+      // Multiple thoughts — resolve people and build SplitPieces
+      const pieces: SplitPiece[] = data.units.map(unit => {
+        let nameDetection: NameDetectionResult = {};
+
+        if (unit.people.length > 0) {
+          // Try each name returned by AI until we get a match
+          for (const name of unit.people) {
+            const matches = (people || []).filter(p => {
+              const fn = p.name.split(' ')[0].toLowerCase();
+              return p.name.toLowerCase() === name.toLowerCase() || fn === name.toLowerCase();
+            });
+            if (matches.length > 1) { nameDetection = { matchedPeople: matches }; break; }
+            if (matches.length === 1) { nameDetection = { matchedPerson: matches[0] }; break; }
+            if (name.length >= 2) { nameDetection = { suggestedName: name }; break; }
+          }
+        } else {
+          nameDetection = detectNamesInChunk(unit.text, people || []);
+        }
+
+        return {
+          text: unit.text,
+          category: unit.category as Category,
+          accepted: true,
+          nameDetection,
+          linkedPersonId: null,
+          addAsNewPerson: false,
+          addAsNewPersonDescriptor: '',
+        };
+      });
+
       setSplitPieces(pieces);
       setSplitMode('reviewing');
+    } catch (err) {
+      console.error('[split] falling back to heuristic:', err);
+      const pieces = makeFallbackPieces();
+      if (pieces.length === 1) {
+        setLocalSuggestedCat(pieces[0].category);
+      } else {
+        setSplitPieces(pieces);
+        setSplitMode('reviewing');
+      }
     } finally {
       setIsSplitLoading(false);
     }
@@ -276,7 +296,10 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         if (piece.addAsNewPerson && piece.nameDetection.suggestedName) {
           try {
             const np = await createPerson.mutateAsync({
-              data: { name: piece.nameDetection.suggestedName }
+              data: {
+                name: piece.nameDetection.suggestedName,
+                ...(piece.addAsNewPersonDescriptor ? { descriptor: piece.addAsNewPersonDescriptor } : {}),
+              },
             });
             personId = np.id;
             queryClient.invalidateQueries({ queryKey: getListPeopleQueryKey() });
@@ -330,7 +353,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     // Note: no finally on success path — component unmounts on navigation
   };
 
-  const suggestedCat = entry.suggestedCategory || 'journal';
+  const suggestedCat = (localSuggestedCat || entry.suggestedCategory || 'journal') as Category;
   const filteredPeople = people?.filter(p =>
     p.name.toLowerCase().includes(personSearch.toLowerCase())
   );
@@ -376,6 +399,11 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
                 onLinkPerson={(personId) => updatePiece(i, { linkedPersonId: personId })}
                 onUnlinkPerson={() => updatePiece(i, { linkedPersonId: null })}
                 onToggleAddNewPerson={(add) => updatePiece(i, { addAsNewPerson: add })}
+                onSwitchToNewPerson={(name) => setSplitPieces(prev => prev.map((p, idx) => idx === i
+                  ? { ...p, addAsNewPerson: true, linkedPersonId: null, nameDetection: { suggestedName: name } }
+                  : p
+                ))}
+                onSetNewPersonDescriptor={(desc) => updatePiece(i, { addAsNewPersonDescriptor: desc })}
               />
             ))}
           </div>
@@ -548,7 +576,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
                       className="justify-start rounded-xl h-9 text-sm"
                       onClick={() => handleLinkExistingPerson(p.id)}
                     >
-                      {p.name}
+                      {p.name}{p.descriptor ? ` (${p.descriptor})` : ''}
                     </Button>
                   ))}
                   {filteredPeople?.length === 0 && (
@@ -579,6 +607,9 @@ interface SplitPieceCardProps {
   onLinkPerson: (id: number) => void;
   onUnlinkPerson: () => void;
   onToggleAddNewPerson: (add: boolean) => void;
+  /** Convert a multi-match disambiguation into a new-person creation with this name */
+  onSwitchToNewPerson: (name: string) => void;
+  onSetNewPersonDescriptor: (desc: string) => void;
 }
 
 function SplitPieceCard({
@@ -588,6 +619,8 @@ function SplitPieceCard({
   onLinkPerson,
   onUnlinkPerson,
   onToggleAddNewPerson,
+  onSwitchToNewPerson,
+  onSetNewPersonDescriptor,
 }: SplitPieceCardProps) {
   const categories: Category[] = ['journal', 'task', 'idea', 'log'];
 
@@ -639,13 +672,16 @@ function SplitPieceCard({
         ))}
       </div>
 
-      {/* Matched existing person suggestion */}
+      {/* Matched existing person suggestion (single unambiguous match) */}
       {piece.nameDetection.matchedPerson && (
         <div className="bg-secondary/50 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground leading-tight">
             Link to{' '}
             <span className="font-semibold text-foreground">
               {piece.nameDetection.matchedPerson.name}
+              {piece.nameDetection.matchedPerson.descriptor
+                ? ` (${piece.nameDetection.matchedPerson.descriptor})`
+                : ''}
             </span>
             ?
           </span>
@@ -667,30 +703,75 @@ function SplitPieceCard({
         </div>
       )}
 
-      {/* Suggested new person */}
-      {piece.nameDetection.suggestedName && !piece.nameDetection.matchedPerson && (
-        <div className="bg-secondary/50 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground leading-tight">
+      {/* Disambiguation: multiple people share the same name */}
+      {piece.nameDetection.matchedPeople && piece.nameDetection.matchedPeople.length > 1 && (
+        <div className="bg-secondary/50 rounded-xl px-3 py-2.5">
+          <p className="text-xs text-muted-foreground mb-2">
             Mentions{' '}
             <span className="font-semibold text-foreground">
-              "{piece.nameDetection.suggestedName}"
+              {piece.nameDetection.matchedPeople[0].name}
             </span>
-            {' '}— add as person?
-          </span>
-          {piece.addAsNewPerson ? (
+            {' '}— which one?
+          </p>
+          <div className="flex flex-col gap-1">
+            {piece.nameDetection.matchedPeople.map(p => (
+              <button
+                key={p.id}
+                onClick={() => piece.linkedPersonId === p.id ? onUnlinkPerson() : onLinkPerson(p.id)}
+                className={`text-left text-xs px-2.5 py-1.5 rounded-lg transition-colors ${
+                  piece.linkedPersonId === p.id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-background hover:bg-primary/10 text-foreground border border-border/40'
+                }`}
+              >
+                {p.name}{p.descriptor ? ` (${p.descriptor})` : ''}
+                {piece.linkedPersonId === p.id && ' ✓'}
+              </button>
+            ))}
             <button
-              onClick={() => onToggleAddNewPerson(false)}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              onClick={() => onSwitchToNewPerson(piece.nameDetection.matchedPeople![0].name)}
+              className="text-left text-xs px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
             >
-              Undo
+              + Add a different {piece.nameDetection.matchedPeople[0].name}
             </button>
-          ) : (
-            <button
-              onClick={() => onToggleAddNewPerson(true)}
-              className="text-xs text-primary font-medium hover:text-primary/80 transition-colors shrink-0"
-            >
-              Add
-            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Suggested new person (no existing match) */}
+      {piece.nameDetection.suggestedName && !piece.nameDetection.matchedPerson && !piece.nameDetection.matchedPeople && (
+        <div className="bg-secondary/50 rounded-xl px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground leading-tight">
+              Mentions{' '}
+              <span className="font-semibold text-foreground">
+                "{piece.nameDetection.suggestedName}"
+              </span>
+              {' '}— add as person?
+            </span>
+            {piece.addAsNewPerson ? (
+              <button
+                onClick={() => onToggleAddNewPerson(false)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                Undo
+              </button>
+            ) : (
+              <button
+                onClick={() => onToggleAddNewPerson(true)}
+                className="text-xs text-primary font-medium hover:text-primary/80 transition-colors shrink-0"
+              >
+                Add
+              </button>
+            )}
+          </div>
+          {piece.addAsNewPerson && (
+            <Input
+              placeholder="Short label (optional): 'Studentina', 'climbing gym'…"
+              value={piece.addAsNewPersonDescriptor}
+              onChange={e => onSetNewPersonDescriptor(e.target.value)}
+              className="h-7 text-xs rounded-xl mt-2"
+            />
           )}
         </div>
       )}

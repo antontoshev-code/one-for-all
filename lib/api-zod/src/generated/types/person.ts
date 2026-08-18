@@ -11,5 +11,10 @@ export interface Person {
   name: string;
   /** @nullable */
   notes?: string | null;
+  /**
+     * Optional short label to distinguish same-named people, e.g. "Studentina", "climbing gym"
+     * @nullable
+     */
+  descriptor?: string | null;
   createdAt: Date;
 }

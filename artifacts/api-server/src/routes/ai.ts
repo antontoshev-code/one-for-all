@@ -49,6 +49,13 @@ const upload = multer({
 
 const router = Router();
 
+// ── Heuristic sentence splitter (fallback when Claude is unavailable) ─────
+
+function heuristicSplit(text: string): string[] {
+  const raw = text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 3);
+  return raw.length > 1 ? raw : [text.trim()];
+}
+
 // ── POST /ai/transcribe ───────────────────────────────────────────────────
 // Accepts multipart/form-data with field "audio".
 // Returns { transcript, source: 'whisper' | 'unavailable' | 'error' }.
@@ -247,6 +254,131 @@ Rules:
   } catch (err) {
     logger.error({ err }, "Claude name detection failed");
     return res.json({ names: Array(texts.length).fill(null), source: "error" });
+  }
+});
+
+// ── POST /ai/split ────────────────────────────────────────────────────────
+// Segments a personal capture into semantic thought units using Claude.
+// Body: { text: string }
+// Returns: { units: Array<{ text, category, people: string[] }>, source: 'claude'|'heuristic' }
+// Falls back to punctuation splitting + heuristic categorization if Claude is unavailable.
+
+router.post("/ai/split", async (req, res) => {
+  const { text } = req.body as { text?: string };
+
+  if (!text?.trim()) {
+    return res.status(400).json({ error: "text is required" });
+  }
+
+  const clean = text.trim();
+
+  const fallback = () =>
+    heuristicSplit(clean).map(chunk => ({
+      text: chunk,
+      category: heuristicCategory(chunk),
+      people: [] as string[],
+    }));
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return res.json({ units: fallback(), source: "heuristic" });
+  }
+
+  try {
+    const anthropic = new Anthropic({ apiKey });
+
+    const response = await anthropic.messages.create({
+      model: "claude-opus-4-5-20251101",
+      max_tokens: 1024,
+      tools: [
+        {
+          name: "return_thought_units",
+          description: "Return the thought units segmented from the personal capture.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              units: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    text: {
+                      type: "string",
+                      description:
+                        "The text of this thought unit. Lightly clean spoken filler (\"you know\", \"hmm\", \"okay so\") and add sentence-ending punctuation if missing — but NEVER invent, summarise, or drop any substantive meaning.",
+                    },
+                    category: {
+                      type: "string",
+                      enum: ["journal", "task", "idea", "log"],
+                    },
+                    people: {
+                      type: "array",
+                      items: { type: "string" },
+                      description:
+                        "Person names genuinely mentioned in this unit, exactly as they appear in the text.",
+                    },
+                  },
+                  required: ["text", "category", "people"],
+                },
+              },
+            },
+            required: ["units"],
+          },
+        },
+      ],
+      tool_choice: { type: "tool", name: "return_thought_units" },
+      system: `You are processing a personal diary / journal capture. Segment it by TRAIN OF THOUGHT — NOT by sentence.
+
+Rules for segmentation:
+- Consecutive statements elaborating the SAME subject stay together as ONE unit.
+- A genuine TOPIC CHANGE starts a new unit.
+- Spoken filler ("you know", "hmm", "okay so", "like", "I mean") and false starts are NOT topic changes — remove them from the output text.
+- Add sentence-ending punctuation where naturally missing, but NEVER invent, summarise, or drop any of the user's substantive meaning. Every substantive part of the original must appear in exactly one unit.
+- A capture may legitimately be a SINGLE thought — in that case return exactly one unit.
+
+Category definitions (assign exactly one per unit):
+- journal: thoughts, feelings, reflections, things that happened, general observations
+- task: something the user needs to do or follow up on (signals: "tomorrow", "need to", "should", "want to" + a concrete action planned)
+- idea: a concept, plan, or possibility the user is exploring or thinking about building/creating
+- log: body, health, workouts, sleep, food, physical sensations ONLY — NOT general daily narration
+
+People: extract person names genuinely mentioned in each unit. Return them exactly as they appear in the text.`,
+      messages: [{ role: "user", content: clean }],
+    });
+
+    const toolUse = response.content.find(b => b.type === "tool_use");
+    if (!toolUse || toolUse.type !== "tool_use") {
+      return res.json({ units: fallback(), source: "heuristic" });
+    }
+
+    const input = toolUse.input as {
+      units: { text: string; category: string; people: string[] }[];
+    };
+
+    if (!Array.isArray(input?.units) || input.units.length === 0) {
+      return res.json({ units: fallback(), source: "heuristic" });
+    }
+
+    const units = input.units
+      .filter(u => u.text?.trim())
+      .map(u => ({
+        text: u.text.trim(),
+        category: (VALID_CATEGORIES.includes(u.category as Category)
+          ? u.category
+          : heuristicCategory(u.text)) as Category,
+        people: Array.isArray(u.people)
+          ? u.people.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+          : [],
+      }));
+
+    if (units.length === 0) {
+      return res.json({ units: fallback(), source: "heuristic" });
+    }
+
+    return res.json({ units, source: "claude" });
+  } catch (err) {
+    logger.error({ err }, "Claude split failed — falling back to heuristic");
+    return res.json({ units: fallback(), source: "heuristic" });
   }
 });
 

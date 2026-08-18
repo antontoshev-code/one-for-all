@@ -5,8 +5,9 @@ import {
   getGetPersonQueryKey, useUnlinkPersonFromEntry,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, ArrowLeft, Trash2, Unlink, AlertCircle } from "lucide-react";
+import { Loader2, ArrowLeft, Trash2, Unlink, AlertCircle, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
@@ -31,9 +32,21 @@ export default function PersonDetail() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [unlinkingId, setUnlinkingId] = useState<number | null>(null);
 
+  // Name editing
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
+
+  // Descriptor editing
+  const [isEditingDescriptor, setIsEditingDescriptor] = useState(false);
+  const [descriptorInput, setDescriptorInput] = useState("");
+  const [isSavingDescriptor, setIsSavingDescriptor] = useState(false);
+
   useEffect(() => {
     if (person && initRef.current !== person.id) {
       setNotes(person.notes || "");
+      setNameInput(person.name || "");
+      setDescriptorInput(person.descriptor || "");
       initRef.current = person.id;
     }
   }, [person]);
@@ -50,6 +63,41 @@ export default function PersonDetail() {
         },
       },
     );
+  };
+
+  const handleSaveName = async () => {
+    if (!person || !nameInput.trim() || isSavingName) return;
+    setIsSavingName(true);
+    try {
+      const updated = await updatePerson.mutateAsync({ id: person.id, data: { name: nameInput.trim() } });
+      queryClient.setQueryData(getGetPersonQueryKey(person.id), (old: any) =>
+        old ? { ...old, name: updated.name } : old
+      );
+      setIsEditingName(false);
+    } catch (err) {
+      console.error("Name save failed", err);
+    } finally {
+      setIsSavingName(false);
+    }
+  };
+
+  const handleSaveDescriptor = async () => {
+    if (!person || isSavingDescriptor) return;
+    setIsSavingDescriptor(true);
+    try {
+      const updated = await updatePerson.mutateAsync({
+        id: person.id,
+        data: { descriptor: descriptorInput.trim() || "" },
+      });
+      queryClient.setQueryData(getGetPersonQueryKey(person.id), (old: any) =>
+        old ? { ...old, descriptor: updated.descriptor } : old
+      );
+      setIsEditingDescriptor(false);
+    } catch (err) {
+      console.error("Descriptor save failed", err);
+    } finally {
+      setIsSavingDescriptor(false);
+    }
   };
 
   const handleDelete = () => {
@@ -125,15 +173,53 @@ export default function PersonDetail() {
         <ArrowLeft className="w-4 h-4 mr-1" /> Back
       </Link>
 
-      <header className="mb-8 flex items-center justify-between gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight truncate">{person.name}</h1>
+      {/* Header: editable name + delete */}
+      <header className="mb-2 flex items-start justify-between gap-3">
+        {isEditingName ? (
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Input
+              autoFocus
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setIsEditingName(false); }}
+              className="text-2xl font-semibold h-12 bg-card"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-9 h-9 rounded-full text-muted-foreground hover:bg-accent shrink-0"
+              onClick={() => { setIsEditingName(false); setNameInput(person.name); }}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-9 h-9 rounded-full text-primary hover:bg-primary/10 shrink-0"
+              disabled={isSavingName || !nameInput.trim()}
+              onClick={handleSaveName}
+            >
+              {isSavingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <h1 className="text-3xl font-semibold tracking-tight truncate">{person.name}</h1>
+            <button
+              onClick={() => { setIsEditingName(true); setNameInput(person.name); }}
+              className="text-muted-foreground/50 hover:text-muted-foreground transition-colors shrink-0 mt-1"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
-        {/* Delete person — uses AlertDialog instead of window.confirm */}
+        {/* Delete */}
         <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
           <Button
             variant="ghost"
             size="icon"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive rounded-full shrink-0"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive rounded-full shrink-0 mt-0.5"
             onClick={() => setShowDeleteDialog(true)}
           >
             <Trash2 className="w-5 h-5" />
@@ -160,6 +246,55 @@ export default function PersonDetail() {
           </AlertDialogContent>
         </AlertDialog>
       </header>
+
+      {/* Descriptor — short contextual label */}
+      <div className="mb-8">
+        {isEditingDescriptor ? (
+          <div className="flex items-center gap-2">
+            <Input
+              autoFocus
+              value={descriptorInput}
+              onChange={e => setDescriptorInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSaveDescriptor(); if (e.key === 'Escape') setIsEditingDescriptor(false); }}
+              placeholder="Short label: 'Studentina', 'climbing gym', 'best friend'…"
+              className="h-8 text-sm bg-card"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-8 h-8 rounded-full text-muted-foreground hover:bg-accent shrink-0"
+              onClick={() => { setIsEditingDescriptor(false); setDescriptorInput(person.descriptor || ""); }}
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-8 h-8 rounded-full text-primary hover:bg-primary/10 shrink-0"
+              disabled={isSavingDescriptor}
+              onClick={handleSaveDescriptor}
+            >
+              {isSavingDescriptor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+            </Button>
+          </div>
+        ) : (
+          <button
+            onClick={() => { setIsEditingDescriptor(true); setDescriptorInput(person.descriptor || ""); }}
+            className="flex items-center gap-1.5 group"
+          >
+            {person.descriptor ? (
+              <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                {person.descriptor}
+              </span>
+            ) : (
+              <span className="text-sm text-muted-foreground/40 italic group-hover:text-muted-foreground transition-colors">
+                Add a label…
+              </span>
+            )}
+            <Pencil className="w-3 h-3 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+          </button>
+        )}
+      </div>
 
       {/* Notes */}
       <div className="mb-10 animate-in fade-in duration-500">
@@ -195,7 +330,6 @@ export default function PersonDetail() {
                       <span>{formatDate(entry.createdAt)}</span>
                     </div>
 
-                    {/* Unlink — always visible (not hover-only, for mobile) */}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button

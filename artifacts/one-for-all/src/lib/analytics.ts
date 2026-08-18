@@ -8,6 +8,7 @@ export type EventType =
   | "suggestion_accepted"
   | "suggestion_rejected"
   | "capture_split"
+  | "entry_edited"
   | "entry_deleted"
   | "export_requested"
   | "data_cleared";

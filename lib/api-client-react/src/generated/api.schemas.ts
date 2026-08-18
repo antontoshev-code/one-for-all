@@ -62,6 +62,11 @@ export interface Person {
   name: string;
   /** @nullable */
   notes?: string | null;
+  /**
+     * Optional short label to distinguish same-named people, e.g. "Studentina", "climbing gym"
+     * @nullable
+     */
+  descriptor?: string | null;
   createdAt: string;
 }
 
@@ -156,12 +161,16 @@ export interface PersonInput {
   /** @minLength 1 */
   name: string;
   notes?: string;
+  /** Optional short label to distinguish same-named people */
+  descriptor?: string;
 }
 
 export interface PersonUpdate {
   /** @minLength 1 */
   name?: string;
   notes?: string;
+  /** Optional short label to distinguish same-named people */
+  descriptor?: string;
 }
 
 export type ListEntriesParams = {

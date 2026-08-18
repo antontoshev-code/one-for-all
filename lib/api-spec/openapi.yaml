@@ -412,6 +412,9 @@ components:
           type: string
         notes:
           type: ["string", "null"]
+        descriptor:
+          type: ["string", "null"]
+          description: Optional short label to distinguish same-named people, e.g. "Studentina", "climbing gym"
         createdAt:
           type: string
           format: date-time
@@ -436,6 +439,9 @@ components:
           minLength: 1
         notes:
           type: string
+        descriptor:
+          type: string
+          description: Optional short label to distinguish same-named people
 
     PersonUpdate:
       type: object
@@ -445,3 +451,6 @@ components:
           minLength: 1
         notes:
           type: string
+        descriptor:
+          type: string
+          description: Optional short label to distinguish same-named people

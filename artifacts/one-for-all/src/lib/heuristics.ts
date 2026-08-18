@@ -68,6 +68,7 @@ export function getMockTranscript(): string {
 
 /**
  * Split a paragraph into individual sentence chunks.
+ * Used as the heuristic fallback when the AI split endpoint is unavailable.
  */
 export function splitIntoChunks(text: string): string[] {
   const raw = text
@@ -149,17 +150,22 @@ const NON_NAME_WORDS = new Set([
 ]);
 
 export interface NameDetectionResult {
-  matchedPerson?: { id: number; name: string };
+  /** Single unambiguous person match */
+  matchedPerson?: { id: number; name: string; descriptor?: string | null };
+  /** Multiple people with the same name — needs disambiguation chooser */
+  matchedPeople?: { id: number; name: string; descriptor?: string | null }[];
+  /** No match — suggest creating a new person with this name */
   suggestedName?: string;
 }
 
 /**
  * Detect personal names in a chunk of text.
- * Strongly prefers under-flagging over false positives.
+ * Returns matchedPeople (> 1 match), matchedPerson (1 match), suggestedName (0 matches),
+ * or {} if no candidate found. Strongly prefers under-flagging over false positives.
  */
 export function detectNamesInChunk(
   chunk: string,
-  existingPeople: { id: number; name: string }[]
+  existingPeople: { id: number; name: string; descriptor?: string | null }[]
 ): NameDetectionResult {
   // Find capitalised words (Title Case, 3+ chars) that are not in the stoplist
   const capitalizedWords = (chunk.match(/\b[A-Z][a-z]{2,}\b/g) || [])
@@ -167,16 +173,17 @@ export function detectNamesInChunk(
 
   if (capitalizedWords.length === 0) return {};
 
-  // Prefer existing-person matches first
+  // Check for person matches (single or multiple with same name)
   for (const candidate of capitalizedWords) {
-    const match = existingPeople.find(p => {
+    const matches = existingPeople.filter(p => {
       const firstName = p.name.split(' ')[0].toLowerCase();
       return (
         p.name.toLowerCase() === candidate.toLowerCase() ||
         firstName === candidate.toLowerCase()
       );
     });
-    if (match) return { matchedPerson: match };
+    if (matches.length > 1) return { matchedPeople: matches };
+    if (matches.length === 1) return { matchedPerson: matches[0] };
   }
 
   // Suggest the first plausible candidate: must be ≥4 chars and not caught by stoplist.
