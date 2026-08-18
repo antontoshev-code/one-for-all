@@ -3,11 +3,20 @@ import multer from "multer";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
+import { aiRateLimit, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
 type Category = "journal" | "task" | "idea" | "log";
 const VALID_CATEGORIES: Category[] = ["journal", "task", "idea", "log"];
+
+/**
+ * Haiku rather than an Opus-tier model: every call here is short-form
+ * classification or segmentation, which Haiku handles well at roughly a fifth
+ * of the cost. Cost per capture is the deciding constraint while the app is
+ * free to use.
+ */
+const CLAUDE_MODEL = "claude-haiku-4-5";
 
 // ── Heuristic fallback (mirrors frontend heuristics.ts) ───────────────────
 
@@ -44,7 +53,7 @@ function heuristicCategory(text: string): Category {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: MAX_AUDIO_BYTES },
 });
 
 const router = Router();
@@ -60,7 +69,7 @@ function heuristicSplit(text: string): string[] {
 // Accepts multipart/form-data with field "audio".
 // Returns { transcript, source: 'whisper' | 'unavailable' | 'error' }.
 
-router.post("/ai/transcribe", upload.single("audio"), async (req, res) => {
+router.post("/ai/transcribe", aiRateLimit, upload.single("audio"), async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
@@ -102,11 +111,18 @@ router.post("/ai/transcribe", upload.single("audio"), async (req, res) => {
 // Body: { texts: string[] }
 // Returns { categories: Category[], source: 'claude' | 'heuristic' }.
 
-router.post("/ai/categorize", async (req, res) => {
+router.post("/ai/categorize", aiRateLimit, async (req, res) => {
   const { texts } = req.body as { texts: string[] };
 
   if (!Array.isArray(texts) || texts.length === 0) {
     return res.status(400).json({ error: "texts must be a non-empty array" });
+  }
+
+  if (texts.join('').length > MAX_TEXT_CHARS) {
+    return res.status(413).json({
+      error: "Too much text to process at once",
+      detail: `Limit is ${MAX_TEXT_CHARS.toLocaleString()} characters across all items.`,
+    });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -120,7 +136,7 @@ router.post("/ai/categorize", async (req, res) => {
     const client = new Anthropic({ apiKey });
 
     const response = await client.messages.create({
-      model: "claude-opus-4-5-20251101",
+      model: CLAUDE_MODEL,
       max_tokens: 512,
       tools: [
         {
@@ -183,11 +199,18 @@ router.post("/ai/categorize", async (req, res) => {
 // Body: { texts: string[] }
 // Returns { names: (string | null)[], source: 'claude' | 'unavailable' | 'error' }.
 
-router.post("/ai/detect-names", async (req, res) => {
+router.post("/ai/detect-names", aiRateLimit, async (req, res) => {
   const { texts } = req.body as { texts: string[] };
 
   if (!Array.isArray(texts) || texts.length === 0) {
     return res.status(400).json({ error: "texts must be a non-empty array" });
+  }
+
+  if (texts.join('').length > MAX_TEXT_CHARS) {
+    return res.status(413).json({
+      error: "Too much text to process at once",
+      detail: `Limit is ${MAX_TEXT_CHARS.toLocaleString()} characters across all items.`,
+    });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -200,7 +223,7 @@ router.post("/ai/detect-names", async (req, res) => {
     const client = new Anthropic({ apiKey });
 
     const response = await client.messages.create({
-      model: "claude-opus-4-5-20251101",
+      model: CLAUDE_MODEL,
       max_tokens: 512,
       tools: [
         {
@@ -263,11 +286,18 @@ Rules:
 // Returns: { units: Array<{ text, category, people: string[] }>, source: 'claude'|'heuristic' }
 // Falls back to punctuation splitting + heuristic categorization if Claude is unavailable.
 
-router.post("/ai/split", async (req, res) => {
+router.post("/ai/split", aiRateLimit, async (req, res) => {
   const { text } = req.body as { text?: string };
 
   if (!text?.trim()) {
     return res.status(400).json({ error: "text is required" });
+  }
+
+  if (text.length > MAX_TEXT_CHARS) {
+    return res.status(413).json({
+      error: "Capture is too long to organise",
+      detail: `Limit is ${MAX_TEXT_CHARS.toLocaleString()} characters. The capture is saved — it just won't be split automatically.`,
+    });
   }
 
   const clean = text.trim();
@@ -288,7 +318,7 @@ router.post("/ai/split", async (req, res) => {
     const anthropic = new Anthropic({ apiKey });
 
     const response = await anthropic.messages.create({
-      model: "claude-opus-4-5-20251101",
+      model: CLAUDE_MODEL,
       max_tokens: 1024,
       tools: [
         {

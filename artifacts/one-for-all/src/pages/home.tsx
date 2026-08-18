@@ -4,7 +4,7 @@ import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle } from "lucide-rea
 import { transcribeAudio } from "@/lib/ai-api";
 import { logEvent } from "@/lib/analytics";
 import { useToast } from "@/hooks/use-toast";
-import { useCreateEntry, useGetEntryStats, getGetEntryStatsQueryKey } from "@workspace/api-client-react";
+import { useCreateEntry, useUpdateEntry, useGetEntryStats, getGetEntryStatsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,6 +58,7 @@ export default function Home() {
   const recordingSession = useRef(0);
   const [, setLocation] = useLocation();
   const createEntry = useCreateEntry();
+  const updateEntry = useUpdateEntry();
   const { data: stats } = useGetEntryStats();
   const queryClient = useQueryClient();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -270,13 +271,30 @@ export default function Home() {
         },
       });
 
-      // ── Step 2: AI categorisation via server endpoint (non-blocking on failure)
-      // The /api/entries/:id/suggest-category endpoint runs LLM inference server-side
-      // with a keyword-heuristic fallback, then persists suggestedCategory on the entry.
+      // ── Step 2: AI categorisation (non-blocking on failure) ─────────────────
+      // /api/ai/categorize is the single categoriser for the whole app — the
+      // same endpoint the split review uses, so Home and Inbox can't disagree
+      // about a capture's category. It falls back to keyword heuristics
+      // server-side when Claude is unavailable, so a failure here only costs
+      // the suggestion; the capture itself is already saved above.
       try {
-        await fetch(`/api/entries/${entry.id}/suggest-category`, { method: "POST" });
+        const res = await fetch("/api/ai/categorize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texts: [content] }),
+        });
+        if (res.ok) {
+          const { categories } = await res.json() as { categories?: string[] };
+          const suggested = categories?.[0];
+          if (suggested) {
+            await updateEntry.mutateAsync({
+              id: entry.id,
+              data: { suggestedCategory: suggested as never },
+            });
+          }
+        }
       } catch (err) {
-        console.error("suggest-category failed (non-fatal):", err);
+        console.error("categorize failed (non-fatal):", err);
       }
 
       queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });

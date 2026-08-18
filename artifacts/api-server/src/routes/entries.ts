@@ -12,7 +12,6 @@ import {
   UnlinkPersonFromEntryParams,
   ListEntriesQueryParams,
 } from "@workspace/api-zod";
-import OpenAI from "openai";
 
 const router: IRouter = Router();
 
@@ -275,98 +274,3 @@ router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> =
 });
 
 export default router;
-
-// ---------------------------------------------------------------------------
-// Categorization: LLM-based with keyword-heuristic fallback
-// ---------------------------------------------------------------------------
-function heuristicCategorize(text: string): "journal" | "task" | "idea" | "log" {
-  const t = text.toLowerCase();
-  const taskWords = ["need to", "remind", "todo", "must", "should", "don't forget", "remember to", "have to", "call", "email", "schedule"];
-  if (taskWords.some((w) => t.includes(w))) return "task";
-  const ideaWords = ["idea", "what if", "concept", "maybe we could", "what about", "thinking about building", "could be interesting"];
-  if (ideaWords.some((w) => t.includes(w))) return "idea";
-  const logWords = ["did", "went", "finished", "completed", "ran", "worked out", "workout", "ate", "cooked", "watched", "read"];
-  if (logWords.some((w) => t.includes(w))) return "log";
-  return "journal";
-}
-
-function getOpenAIClient(): OpenAI | null {
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!baseURL || !apiKey) return null;
-  return new OpenAI({ apiKey, baseURL });
-}
-
-// POST /entries/:id/suggest-category — LLM categorization, heuristic fallback
-router.post("/entries/:id/suggest-category", async (req, res): Promise<void> => {
-  const params = GetEntryParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  try {
-    const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, params.data.id));
-    if (!entry) {
-      res.status(404).json({ error: "Entry not found" });
-      return;
-    }
-
-    const validCategories = ["journal", "task", "idea", "log"] as const;
-    let category: "journal" | "task" | "idea" | "log";
-    let reason: string;
-    let usedAI = false;
-
-    const client = getOpenAIClient();
-    if (client) {
-      try {
-        const response = await client.chat.completions.create({
-          model: "gpt-4o-mini",
-          max_tokens: 120,
-          messages: [
-            {
-              role: "system",
-              content: `You are a personal note categorizer. Given a note, classify it into exactly one of these categories:
-- task: action items, todos, reminders, things still to be done
-- idea: creative thoughts, brainstorming, concepts, "what if" thoughts
-- log: past events, activities already completed, things that happened
-- journal: personal reflections, feelings, observations, general thoughts
-
-Respond with JSON only, no markdown: {"category": "<journal|task|idea|log>", "reason": "<10 words max explaining why>"}`,
-            },
-            { role: "user", content: entry.content },
-          ],
-        });
-        const text = response.choices[0]?.message?.content ?? "";
-        const parsedJson = JSON.parse(text.replace(/```json|```/g, "").trim()) as {
-          category?: string;
-          reason?: string;
-        };
-        if (parsedJson.category && (validCategories as readonly string[]).includes(parsedJson.category)) {
-          category = parsedJson.category as (typeof validCategories)[number];
-          reason = parsedJson.reason ?? "AI categorization";
-          usedAI = true;
-        } else {
-          category = heuristicCategorize(entry.content);
-          reason = "Keyword heuristic (AI returned invalid category)";
-        }
-      } catch {
-        category = heuristicCategorize(entry.content);
-        reason = "Keyword heuristic (AI unavailable)";
-      }
-    } else {
-      category = heuristicCategorize(entry.content);
-      reason = "Keyword heuristic (AI not configured)";
-    }
-
-    const [updated] = await db
-      .update(entriesTable)
-      .set({ suggestedCategory: category, updatedAt: new Date() })
-      .where(eq(entriesTable.id, params.data.id))
-      .returning();
-
-    res.json({ ...updated, suggestionReason: reason, usedAI });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to suggest category", detail: String(err) });
-  }
-});
