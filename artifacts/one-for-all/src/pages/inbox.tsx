@@ -15,7 +15,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2, Check, X, UserPlus, Scissors, ChevronLeft,
-  CheckCheck, UserCheck, AlertCircle,
+  UserCheck, AlertCircle,
 } from "lucide-react";
 import { logEvent } from "@/lib/analytics";
 import { Button } from "@/components/ui/button";
@@ -131,8 +131,10 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   const confirmingRef = useRef(false);
 
   const invalidateAll = async () => {
+    // refetchQueries (not invalidateQueries) ensures the network request completes
+    // before we dismiss the split overlay — prevents stale entries re-appearing.
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category: 'inbox' }) }),
+      queryClient.refetchQueries({ queryKey: getListEntriesQueryKey({ category: 'inbox' }) }),
       queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() }),
     ]);
   };
@@ -258,10 +260,6 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     setSplitPieces(prev => prev.map((p, idx) => idx === i ? { ...p, ...patch } : p));
   };
 
-  const handleAcceptAll = () => {
-    setSplitPieces(prev => prev.map(p => ({ ...p, accepted: true })));
-  };
-
   const handleConfirmSplit = async () => {
     const accepted = splitPieces.filter(p => p.accepted);
     if (accepted.length === 0) return;
@@ -384,24 +382,16 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         </div>
 
         {/* Footer */}
-        <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border/50 px-4 py-4 max-w-2xl mx-auto w-full flex gap-3">
+        <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border/50 px-4 py-4 max-w-2xl mx-auto w-full">
           <Button
-            variant="outline"
-            className="rounded-full h-11 flex-none"
-            onClick={handleAcceptAll}
-          >
-            <CheckCheck className="w-4 h-4 mr-2" />
-            Accept All
-          </Button>
-          <Button
-            className="flex-1 rounded-full h-11 bg-foreground text-background hover:bg-foreground/90"
+            className="w-full rounded-full h-11 bg-foreground text-background hover:bg-foreground/90 disabled:opacity-50"
             disabled={acceptedCount === 0 || isConfirming}
             onClick={handleConfirmSplit}
           >
-            {isConfirming
-              ? <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              : null}
-            Confirm {acceptedCount} {acceptedCount === 1 ? 'piece' : 'pieces'}
+            {isConfirming && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+            {acceptedCount === 0
+              ? 'Select at least one piece'
+              : `Save ${acceptedCount} ${acceptedCount === 1 ? 'piece' : 'pieces'}`}
           </Button>
         </div>
       </div>

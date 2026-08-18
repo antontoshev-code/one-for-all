@@ -4,10 +4,11 @@ import {
   getListEntriesQueryKey, getGetEntryStatsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Trash2, AlertCircle } from "lucide-react";
+import { Loader2, Trash2, AlertCircle, Pencil, Check, X } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -53,13 +54,22 @@ export default function CategoryList({ category, title, description }: CategoryL
   const queryClient = useQueryClient();
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const empty = EMPTY_MESSAGES[category] ?? { headline: "Nothing here yet", sub: "" };
 
   const toggleTask = (id: number, isDone: boolean) => {
     updateEntry.mutate(
       { id, data: { isTaskDone: isDone } },
-      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category }) }) },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category }) });
+          // Invalidate stats so Home task count stays accurate
+          queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
+        },
+      },
     );
   };
 
@@ -73,10 +83,46 @@ export default function CategoryList({ category, title, description }: CategoryL
         queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() }),
       ]);
       if (expandedId === id) setExpandedId(null);
+      if (editingId === id) setEditingId(null);
     } catch (err) {
       console.error("Delete failed", err);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleStartEdit = (id: number, currentContent: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(id);
+    setEditText(currentContent);
+    // Ensure the card stays expanded while editing
+    if (expandedId !== id) setExpandedId(id);
+  };
+
+  const handleCancelEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(null);
+    setEditText("");
+  };
+
+  const handleSaveEdit = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const trimmed = editText.trim();
+    if (!trimmed || isSavingEdit) return;
+    setIsSavingEdit(true);
+    try {
+      await updateEntry.mutateAsync({ id, data: { content: trimmed } });
+      logEvent("entry_edited", { entryId: id, category });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category }) }),
+        queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() }),
+      ]);
+      setEditingId(null);
+      setEditText("");
+    } catch (err) {
+      console.error("Edit save failed", err);
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -138,13 +184,18 @@ export default function CategoryList({ category, title, description }: CategoryL
         <div className="flex flex-col gap-3">
           {entries?.map((entry, i) => {
             const isExpanded = expandedId === entry.id;
+            const isEditing = editingId === entry.id;
             const isDone = entry.isTaskDone;
             const isDeleting = deletingId === entry.id;
 
             return (
               <div
                 key={entry.id}
-                onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                onClick={() => {
+                  // Don't collapse while editing
+                  if (isEditing) return;
+                  setExpandedId(isExpanded ? null : entry.id);
+                }}
                 className={`bg-card border border-border/40 rounded-3xl p-4 transition-all duration-300 cursor-pointer animate-in slide-in-from-bottom-2 fade-in ${
                   isExpanded ? "shadow-md" : "hover:bg-accent/30"
                 }`}
@@ -162,48 +213,99 @@ export default function CategoryList({ category, title, description }: CategoryL
                   )}
 
                   <div className="flex-1 min-w-0">
-                    <p className={`text-foreground leading-relaxed transition-all ${!isExpanded ? "line-clamp-2" : ""} ${isDone ? "line-through text-muted-foreground" : ""}`}>
-                      {entry.content}
-                    </p>
+                    {/* Content — either plain text or editable textarea */}
+                    {isEditing ? (
+                      <Textarea
+                        autoFocus
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        className="text-foreground leading-relaxed resize-none rounded-xl text-[15px] min-h-[80px]"
+                        rows={3}
+                      />
+                    ) : (
+                      <p className={`text-foreground leading-relaxed transition-all ${!isExpanded ? "line-clamp-2" : ""} ${isDone ? "line-through text-muted-foreground" : ""}`}>
+                        {entry.content}
+                      </p>
+                    )}
 
                     <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
                       <span>{formatDate(entry.createdAt)}</span>
 
-                      {isExpanded && (
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="w-9 h-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive shrink-0"
-                              disabled={isDeleting}
-                              onClick={e => e.stopPropagation()}
-                            >
-                              {isDeleting
-                                ? <Loader2 className="w-4 h-4 animate-spin" />
-                                : <Trash2 className="w-4 h-4" />}
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This permanently removes the entry. This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel onClick={e => e.stopPropagation()}>
-                                Cancel
-                              </AlertDialogCancel>
-                              <AlertDialogAction
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                onClick={e => { e.stopPropagation(); handleDelete(entry.id); }}
+                      {isExpanded && !isEditing && (
+                        <div className="flex items-center gap-1">
+                          {/* Edit button */}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-9 h-9 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground shrink-0"
+                            disabled={isDeleting}
+                            onClick={e => handleStartEdit(entry.id, entry.content ?? "", e)}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+
+                          {/* Delete button */}
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-9 h-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive shrink-0"
+                                disabled={isDeleting}
+                                onClick={e => e.stopPropagation()}
                               >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                                {isDeleting
+                                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                                  : <Trash2 className="w-4 h-4" />}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This permanently removes the entry. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel onClick={e => e.stopPropagation()}>
+                                  Cancel
+                                </AlertDialogCancel>
+                                <AlertDialogAction
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  onClick={e => { e.stopPropagation(); handleDelete(entry.id); }}
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
+
+                      {/* Save / Cancel row when editing */}
+                      {isEditing && (
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-9 h-9 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground shrink-0"
+                            onClick={handleCancelEdit}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-9 h-9 rounded-full text-primary hover:bg-primary/10 shrink-0"
+                            disabled={isSavingEdit || !editText.trim()}
+                            onClick={e => handleSaveEdit(entry.id, e)}
+                          >
+                            {isSavingEdit
+                              ? <Loader2 className="w-4 h-4 animate-spin" />
+                              : <Check className="w-4 h-4" />}
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>

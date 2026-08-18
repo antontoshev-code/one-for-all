@@ -1,16 +1,22 @@
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
-import { Loader2, Mic, PenLine, AlertCircle, Clock } from "lucide-react";
+import { Loader2, Mic, PenLine, AlertCircle, Clock, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────
+
+interface HistoryPerson {
+  id: number;
+  name: string;
+}
 
 interface HistoryEntry {
   entryId: number | null;
   category: string;
   content: string | null;
   exists: boolean;
+  people: HistoryPerson[];
 }
 
 interface HistoryCapture {
@@ -129,6 +135,16 @@ export default function History() {
       <div className="flex flex-col gap-4">
         {captures.map((capture, i) => {
           const isSplit = capture.entries.length > 1;
+
+          // Deduplicate people across all entries in this capture
+          const allPeopleMap = new Map<number, string>();
+          for (const entry of capture.entries) {
+            for (const person of entry.people ?? []) {
+              allPeopleMap.set(person.id, person.name);
+            }
+          }
+          const allPeople = Array.from(allPeopleMap.entries()).map(([id, name]) => ({ id, name }));
+
           return (
             <div
               key={capture.id}
@@ -151,7 +167,7 @@ export default function History() {
                 {capture.content}
               </p>
 
-              {/* Result row */}
+              {/* Result row — category chips */}
               <div className="pt-3 border-t border-border/30">
                 <p className="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">
                   {isSplit
@@ -165,7 +181,6 @@ export default function History() {
                     const label = <span className="capitalize font-medium">{entry.category}</span>;
 
                     if (!entry.exists || !route) {
-                      // Entry was deleted after being created
                       return (
                         <span
                           key={j}
@@ -187,6 +202,20 @@ export default function History() {
                     );
                   })}
                 </div>
+
+                {/* People chips */}
+                {allPeople.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {allPeople.map(person => (
+                      <Link key={person.id} href={`/people/${person.id}`}>
+                        <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 hover:opacity-80 transition-opacity cursor-pointer">
+                          <User className="w-2.5 h-2.5" />
+                          {person.name}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           );

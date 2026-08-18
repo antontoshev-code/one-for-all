@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { eq, sql } from "drizzle-orm";
-import { db, capturesTable, captureEntriesTable, entriesTable } from "@workspace/db";
+import { db, capturesTable, captureEntriesTable, entriesTable, entryPeopleTable, peopleTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -29,17 +29,26 @@ router.get("/captures", async (_req, res): Promise<void> => {
                 category: link.categorySnapshot,
                 content: null,
                 exists: false,
+                people: [],
               };
             }
             const [entry] = await db
               .select()
               .from(entriesTable)
               .where(eq(entriesTable.id, link.entryId));
+
+            const personRows = await db
+              .select({ id: peopleTable.id, name: peopleTable.name })
+              .from(entryPeopleTable)
+              .innerJoin(peopleTable, eq(entryPeopleTable.personId, peopleTable.id))
+              .where(eq(entryPeopleTable.entryId, link.entryId));
+
             return {
               entryId: link.entryId,
               category: link.categorySnapshot,
               content: entry?.content ?? null,
               exists: !!entry,
+              people: personRows,
             };
           }),
         );

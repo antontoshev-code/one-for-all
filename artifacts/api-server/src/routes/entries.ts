@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, inArray } from "drizzle-orm";
+import { eq, sql, inArray, and, or, isNull } from "drizzle-orm";
 import { db, entriesTable, peopleTable, entryPeopleTable } from "@workspace/db";
 import {
   CreateEntryBody,
@@ -111,6 +111,7 @@ router.post("/entries", async (req, res): Promise<void> => {
 });
 
 // GET /entries/stats — per-category counts
+// Task count = open tasks only (isTaskDone false/null) so Home badge hits 0 when all tasks are done.
 router.get("/entries/stats", async (_req, res): Promise<void> => {
   try {
     const rows = await db
@@ -122,6 +123,16 @@ router.get("/entries/stats", async (_req, res): Promise<void> => {
     for (const row of rows) {
       counts[row.category] = row.count;
     }
+
+    // Override task count with open-only (isTaskDone = false or null)
+    const [openTaskRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(entriesTable)
+      .where(and(
+        eq(entriesTable.category, "task"),
+        or(eq(entriesTable.isTaskDone, false), isNull(entriesTable.isTaskDone)),
+      ));
+    counts["task"] = openTaskRow?.count ?? 0;
 
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     res.json({ ...counts, total });
