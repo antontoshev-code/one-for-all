@@ -80,7 +80,7 @@ router.post("/ai/transcribe", upload.single("audio"), async (req, res) => {
       : req.file.mimetype?.includes("mp4") ? "mp4"
       : req.file.mimetype?.includes("m4a") ? "m4a"
       : "webm";
-    const audioFile = new File([req.file.buffer], `recording.${ext}`, {
+    const audioFile = new File([new Uint8Array(req.file.buffer)], `recording.${ext}`, {
       type: req.file.mimetype || "audio/webm",
     });
 
