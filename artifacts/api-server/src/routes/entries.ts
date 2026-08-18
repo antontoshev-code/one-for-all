@@ -14,9 +14,6 @@ import {
 } from "@workspace/api-zod";
 import OpenAI from "openai";
 
-// ---------------------------------------------------------------------------
-// Keyword heuristic — used as a fallback when LLM is unavailable or fails
-// ---------------------------------------------------------------------------
 const router: IRouter = Router();
 
 // ── Server-side dedup guard ───────────────────────────────────────────────
@@ -58,19 +55,23 @@ async function getEntryWithPeople(id: number) {
 
 // GET /entries — list, optionally filtered by category
 router.get("/entries", async (req, res): Promise<void> => {
-  const parsed = LinkPersonToEntryBody.safeParse(req.body);
-
-      const validCategories = ["journal", "task", "idea", "log"] as const;
+  const parsed = ListEntriesQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
   try {
-    const rows = await db
-      .select({ category: entriesTable.category, count: sql<number>`count(*)::int` })
-      .from(entriesTable)
-      .groupBy(entriesTable.category);
+    const rows = parsed.data.category
+      ? await db
+          .select()
+          .from(entriesTable)
+          .where(eq(entriesTable.category, parsed.data.category))
+          .orderBy(sql`${entriesTable.createdAt} desc`)
+      : await db
+          .select()
+          .from(entriesTable)
+          .orderBy(sql`${entriesTable.createdAt} desc`);
 
     res.json(rows);
   } catch (err) {
@@ -80,9 +81,7 @@ router.get("/entries", async (req, res): Promise<void> => {
 
 // POST /entries — create
 router.post("/entries", async (req, res): Promise<void> => {
-  const parsed = LinkPersonToEntryBody.safeParse(req.body);
-
-      const validCategories = ["journal", "task", "idea", "log"] as const;
+  const parsed = CreateEntryBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
@@ -96,9 +95,15 @@ router.post("/entries", async (req, res): Promise<void> => {
   }
 
   try {
-  const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, params.data.id));
-
-  let category: "journal" | "task" | "idea" | "log";
+    const [entry] = await db
+      .insert(entriesTable)
+      .values({
+        content: data.content,
+        captureType: data.captureType,
+        category: data.category ?? "inbox",
+        suggestedCategory: data.suggestedCategory ?? null,
+      })
+      .returning();
 
     res.status(201).json(entry);
   } catch (err) {
@@ -139,19 +144,13 @@ router.get("/entries/stats", async (_req, res): Promise<void> => {
 
 // GET /entries/:id — single entry with people
 router.get("/entries/:id", async (req, res): Promise<void> => {
-  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
+  const params = GetEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
   try {
-    await db
-      .delete(entryPeopleTable)
-      .where(
-        sql`${entryPeopleTable.entryId} = ${params.data.id} AND ${entryPeopleTable.personId} = ${params.data.personId}`,
-      );
-
     const entry = await getEntryWithPeople(params.data.id);
     if (!entry) {
       res.status(404).json({ error: "Entry not found" });
@@ -159,21 +158,19 @@ router.get("/entries/:id", async (req, res): Promise<void> => {
     }
     res.json(entry);
   } catch (err) {
-    res.status(500).json({ error: "Failed to link person", detail: String(err) });
+    res.status(500).json({ error: "Failed to get entry", detail: String(err) });
   }
 });
 
-// DELETE /entries/:id/people/:personId — unlink person
-router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> => {
-  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
+// PATCH /entries/:id — update (categorize, toggle done, edit text)
+router.patch("/entries/:id", async (req, res): Promise<void> => {
+  const params = UpdateEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
-  const parsed = LinkPersonToEntryBody.safeParse(req.body);
-
-      const validCategories = ["journal", "task", "idea", "log"] as const;
+  const parsed = UpdateEntryBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
@@ -188,9 +185,11 @@ router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> =
   if (parsed.data.suggestedCategory != null) updates.suggestedCategory = parsed.data.suggestedCategory;
 
   try {
-  const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, params.data.id));
-
-  let category: "journal" | "task" | "idea" | "log";
+    const [entry] = await db
+      .update(entriesTable)
+      .set(updates)
+      .where(eq(entriesTable.id, params.data.id))
+      .returning();
 
     if (!entry) {
       res.status(404).json({ error: "Entry not found" });
@@ -202,9 +201,9 @@ router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> =
   }
 });
 
-// POST /entries/:id/suggest-category — LLM-based categorization with heuristic fallback
-router.post("/entries/:id/suggest-category", async (req, res): Promise<void> => {
-  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
+// DELETE /entries/:id
+router.delete("/entries/:id", async (req, res): Promise<void> => {
+  const params = DeleteEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
@@ -220,15 +219,13 @@ router.post("/entries/:id/suggest-category", async (req, res): Promise<void> => 
 
 // POST /entries/:id/people — link person
 router.post("/entries/:id/people", async (req, res): Promise<void> => {
-  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
+  const params = LinkPersonToEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
   const parsed = LinkPersonToEntryBody.safeParse(req.body);
-
-      const validCategories = ["journal", "task", "idea", "log"] as const;
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
@@ -279,6 +276,9 @@ router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> =
 
 export default router;
 
+// ---------------------------------------------------------------------------
+// Categorization: LLM-based with keyword-heuristic fallback
+// ---------------------------------------------------------------------------
 function heuristicCategorize(text: string): "journal" | "task" | "idea" | "log" {
   const t = text.toLowerCase();
   const taskWords = ["need to", "remind", "todo", "must", "should", "don't forget", "remember to", "have to", "call", "email", "schedule"];
@@ -290,10 +290,6 @@ function heuristicCategorize(text: string): "journal" | "task" | "idea" | "log" 
   return "journal";
 }
 
-  let reason: string;
-
-  let usedAI = false;
-
 function getOpenAIClient(): OpenAI | null {
   const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
@@ -301,27 +297,76 @@ function getOpenAIClient(): OpenAI | null {
   return new OpenAI({ apiKey, baseURL });
 }
 
-      const text = response.choices[0]?.message?.content ?? "";
+// POST /entries/:id/suggest-category — LLM categorization, heuristic fallback
+router.post("/entries/:id/suggest-category", async (req, res): Promise<void> => {
+  const params = GetEntryParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
 
-  const client = getOpenAIClient();
+  try {
+    const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, params.data.id));
+    if (!entry) {
+      res.status(404).json({ error: "Entry not found" });
+      return;
+    }
 
-      const response = await client.chat.completions.create({
-        model: "gpt-4o-mini",
-        max_tokens: 120,
-        messages: [
-          {
-            role: "system",
-            content: `You are a personal note categorizer. Given a note, classify it into exactly one of these categories:
+    const validCategories = ["journal", "task", "idea", "log"] as const;
+    let category: "journal" | "task" | "idea" | "log";
+    let reason: string;
+    let usedAI = false;
+
+    const client = getOpenAIClient();
+    if (client) {
+      try {
+        const response = await client.chat.completions.create({
+          model: "gpt-4o-mini",
+          max_tokens: 120,
+          messages: [
+            {
+              role: "system",
+              content: `You are a personal note categorizer. Given a note, classify it into exactly one of these categories:
 - task: action items, todos, reminders, things still to be done
 - idea: creative thoughts, brainstorming, concepts, "what if" thoughts
 - log: past events, activities already completed, things that happened
 - journal: personal reflections, feelings, observations, general thoughts
 
 Respond with JSON only, no markdown: {"category": "<journal|task|idea|log>", "reason": "<10 words max explaining why>"}`,
-          },
-          {
-            role: "user",
-            content: entry.content,
-          },
-        ],
-      });
+            },
+            { role: "user", content: entry.content },
+          ],
+        });
+        const text = response.choices[0]?.message?.content ?? "";
+        const parsedJson = JSON.parse(text.replace(/```json|```/g, "").trim()) as {
+          category?: string;
+          reason?: string;
+        };
+        if (parsedJson.category && (validCategories as readonly string[]).includes(parsedJson.category)) {
+          category = parsedJson.category as (typeof validCategories)[number];
+          reason = parsedJson.reason ?? "AI categorization";
+          usedAI = true;
+        } else {
+          category = heuristicCategorize(entry.content);
+          reason = "Keyword heuristic (AI returned invalid category)";
+        }
+      } catch {
+        category = heuristicCategorize(entry.content);
+        reason = "Keyword heuristic (AI unavailable)";
+      }
+    } else {
+      category = heuristicCategorize(entry.content);
+      reason = "Keyword heuristic (AI not configured)";
+    }
+
+    const [updated] = await db
+      .update(entriesTable)
+      .set({ suggestedCategory: category, updatedAt: new Date() })
+      .where(eq(entriesTable.id, params.data.id))
+      .returning();
+
+    res.json({ ...updated, suggestionReason: reason, usedAI });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to suggest category", detail: String(err) });
+  }
+});
