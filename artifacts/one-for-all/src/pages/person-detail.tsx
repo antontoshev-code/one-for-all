@@ -16,6 +16,163 @@ import {
 } from "@/components/ui/alert-dialog";
 import { formatDate } from "@/lib/utils";
 
+// ── Inline-editable detail row ────────────────────────────────────────────
+
+function DetailRow({
+  label, value, placeholder, onSave,
+}: {
+  label: string;
+  value: string | null | undefined;
+  placeholder: string;
+  onSave: (next: string) => Promise<void>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const begin = () => { setDraft(value || ""); setIsEditing(true); };
+
+  const commit = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      await onSave(draft.trim());
+      setIsEditing(false);
+    } catch (err) {
+      console.error(`${label} save failed`, err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-border/40 last:border-0">
+      <span className="text-sm text-muted-foreground shrink-0">{label}</span>
+      {isEditing ? (
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
+          <Input
+            autoFocus
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") setIsEditing(false);
+            }}
+            placeholder={placeholder}
+            className="h-8 text-sm bg-background max-w-[16rem]"
+          />
+          <Button
+            variant="ghost" size="icon"
+            className="w-8 h-8 rounded-full text-muted-foreground hover:bg-accent shrink-0"
+            onClick={() => setIsEditing(false)}
+          >
+            <X className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost" size="icon"
+            className="w-8 h-8 rounded-full text-primary hover:bg-primary/10 shrink-0"
+            disabled={isSaving}
+            onClick={commit}
+          >
+            {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+          </Button>
+        </div>
+      ) : (
+        <button onClick={begin} className="flex items-center gap-1.5 group min-w-0 text-right">
+          <span className={value
+            ? "text-sm text-foreground truncate"
+            : "text-sm text-muted-foreground/40 italic"}>
+            {value || placeholder}
+          </span>
+          <Pencil className="w-3 h-3 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors shrink-0" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Aliases ───────────────────────────────────────────────────────────────
+
+function AliasEditor({
+  aliases, onSave,
+}: {
+  aliases: string[];
+  onSave: (next: string[]) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const commit = async (next: string[]) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      await onSave(next);
+      setDraft("");
+    } catch (err) {
+      console.error("Alias save failed", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const add = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    // Case-insensitive check so "petja" doesn't get added next to "Petja".
+    const exists = aliases.some(a => a.toLocaleLowerCase() === trimmed.toLocaleLowerCase());
+    if (exists) { setDraft(""); return; }
+    commit([...aliases, trimmed]);
+  };
+
+  return (
+    <div>
+      <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+        Other spellings this person is known by. Transcription and different alphabets produce
+        variants — adding them here means a mention is recognised however it's written.
+      </p>
+
+      {aliases.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {aliases.map(alias => (
+            <span
+              key={alias}
+              className="inline-flex items-center gap-1.5 bg-secondary text-secondary-foreground rounded-full pl-3 pr-1.5 py-1 text-sm"
+            >
+              {alias}
+              <button
+                onClick={() => commit(aliases.filter(a => a !== alias))}
+                disabled={isSaving}
+                aria-label={`Remove alias ${alias}`}
+                className="rounded-full p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <Input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") add(); }}
+          placeholder="Add a spelling, e.g. Petja or Петя"
+          className="h-9 text-sm bg-background"
+        />
+        <Button
+          variant="outline"
+          className="rounded-full h-9 shrink-0"
+          disabled={isSaving || !draft.trim()}
+          onClick={add}
+        >
+          {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function PersonDetail() {
   const { id } = useParams();
   const personId = parseInt(id || "0", 10);
@@ -98,6 +255,16 @@ export default function PersonDetail() {
     } finally {
       setIsSavingDescriptor(false);
     }
+  };
+
+  // Shared writer for the Details fields. Merges the server's response into the
+  // cached person so the row shows the saved value without a refetch.
+  const savePatch = async (patch: Record<string, unknown>) => {
+    if (!person) return;
+    const updated = await updatePerson.mutateAsync({ id: person.id, data: patch });
+    queryClient.setQueryData(getGetPersonQueryKey(person.id), (old: any) =>
+      old ? { ...old, ...updated } : old
+    );
   };
 
   const handleDelete = () => {
@@ -294,6 +461,52 @@ export default function PersonDetail() {
             <Pencil className="w-3 h-3 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
           </button>
         )}
+      </div>
+
+      {/* Details */}
+      <div className="mb-10 animate-in fade-in duration-500">
+        <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3 block px-2">
+          Details
+        </label>
+        <div className="bg-card border border-border/50 rounded-3xl px-5 py-1 shadow-sm">
+          <DetailRow
+            label="Birthday"
+            value={person.birthday}
+            placeholder="e.g. 12 October, or just October"
+            onSave={next => savePatch({ birthday: next })}
+          />
+          <DetailRow
+            label="From"
+            value={person.countryOfOrigin}
+            placeholder="Country of origin"
+            onSave={next => savePatch({ countryOfOrigin: next })}
+          />
+          <DetailRow
+            label="Lives in"
+            value={person.countryOfResidence}
+            placeholder="Only if different"
+            onSave={next => savePatch({ countryOfResidence: next })}
+          />
+          <DetailRow
+            label="How we met"
+            value={person.howWeMet}
+            placeholder="Where and when you met"
+            onSave={next => savePatch({ howWeMet: next })}
+          />
+        </div>
+      </div>
+
+      {/* Also known as */}
+      <div className="mb-10 animate-in fade-in duration-500">
+        <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3 block px-2">
+          Also Known As
+        </label>
+        <div className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">
+          <AliasEditor
+            aliases={person.aliases ?? []}
+            onSave={next => savePatch({ aliases: next })}
+          />
+        </div>
       </div>
 
       {/* Notes */}

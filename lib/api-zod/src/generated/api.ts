@@ -96,6 +96,11 @@ export const GetEntryResponse = zod.object({
   "name": zod.string(),
   "notes": zod.string().nullish(),
   "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
+  "aliases": zod.array(zod.string()).describe('Alternate spellings this person is known by, e.g. \"Petja\" or \"Петя\" for \"Petya\". Mention detection matches against name and aliases.'),
+  "birthday": zod.string().nullish().describe('Free text so partial birthdays (\"October\") are possible, not just full dates'),
+  "countryOfOrigin": zod.string().nullish(),
+  "countryOfResidence": zod.string().nullish().describe('Left blank when the person still lives where they are from'),
+  "howWeMet": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
 }))
@@ -166,6 +171,11 @@ export const LinkPersonToEntryResponse = zod.object({
   "name": zod.string(),
   "notes": zod.string().nullish(),
   "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
+  "aliases": zod.array(zod.string()).describe('Alternate spellings this person is known by, e.g. \"Petja\" or \"Петя\" for \"Petya\". Mention detection matches against name and aliases.'),
+  "birthday": zod.string().nullish().describe('Free text so partial birthdays (\"October\") are possible, not just full dates'),
+  "countryOfOrigin": zod.string().nullish(),
+  "countryOfResidence": zod.string().nullish().describe('Left blank when the person still lives where they are from'),
+  "howWeMet": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
 }))
@@ -194,6 +204,11 @@ export const UnlinkPersonFromEntryResponse = zod.object({
   "name": zod.string(),
   "notes": zod.string().nullish(),
   "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
+  "aliases": zod.array(zod.string()).describe('Alternate spellings this person is known by, e.g. \"Petja\" or \"Петя\" for \"Petya\". Mention detection matches against name and aliases.'),
+  "birthday": zod.string().nullish().describe('Free text so partial birthdays (\"October\") are possible, not just full dates'),
+  "countryOfOrigin": zod.string().nullish(),
+  "countryOfResidence": zod.string().nullish().describe('Left blank when the person still lives where they are from'),
+  "howWeMet": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }))
 }))
@@ -207,6 +222,11 @@ export const ListPeopleResponseItem = zod.object({
   "name": zod.string(),
   "notes": zod.string().nullish(),
   "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
+  "aliases": zod.array(zod.string()).describe('Alternate spellings this person is known by, e.g. \"Petja\" or \"Петя\" for \"Petya\". Mention detection matches against name and aliases.'),
+  "birthday": zod.string().nullish().describe('Free text so partial birthdays (\"October\") are possible, not just full dates'),
+  "countryOfOrigin": zod.string().nullish(),
+  "countryOfResidence": zod.string().nullish().describe('Left blank when the person still lives where they are from'),
+  "howWeMet": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 export const ListPeopleResponse = zod.array(ListPeopleResponseItem)
@@ -221,7 +241,12 @@ export const ListPeopleResponse = zod.array(ListPeopleResponseItem)
 export const CreatePersonBody = zod.object({
   "name": zod.string().min(1),
   "notes": zod.string().optional(),
-  "descriptor": zod.string().optional().describe('Optional short label to distinguish same-named people')
+  "descriptor": zod.string().optional().describe('Optional short label to distinguish same-named people'),
+  "aliases": zod.array(zod.string()).optional(),
+  "birthday": zod.string().optional(),
+  "countryOfOrigin": zod.string().optional(),
+  "countryOfResidence": zod.string().optional(),
+  "howWeMet": zod.string().optional()
 })
 
 export const CreatePersonResponse = zod.object({
@@ -229,6 +254,11 @@ export const CreatePersonResponse = zod.object({
   "name": zod.string(),
   "notes": zod.string().nullish(),
   "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
+  "aliases": zod.array(zod.string()).describe('Alternate spellings this person is known by, e.g. \"Petja\" or \"Петя\" for \"Petya\". Mention detection matches against name and aliases.'),
+  "birthday": zod.string().nullish().describe('Free text so partial birthdays (\"October\") are possible, not just full dates'),
+  "countryOfOrigin": zod.string().nullish(),
+  "countryOfResidence": zod.string().nullish().describe('Left blank when the person still lives where they are from'),
+  "howWeMet": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 
@@ -245,6 +275,11 @@ export const GetPersonResponse = zod.object({
   "name": zod.string(),
   "notes": zod.string().nullish(),
   "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
+  "aliases": zod.array(zod.string()).describe('Alternate spellings this person is known by, e.g. \"Petja\" or \"Петя\" for \"Petya\". Mention detection matches against name and aliases.'),
+  "birthday": zod.string().nullish().describe('Free text so partial birthdays (\"October\") are possible, not just full dates'),
+  "countryOfOrigin": zod.string().nullish(),
+  "countryOfResidence": zod.string().nullish().describe('Left blank when the person still lives where they are from'),
+  "howWeMet": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 }).and(zod.object({
   "entries": zod.array(zod.object({
@@ -273,7 +308,12 @@ export const UpdatePersonParams = zod.object({
 export const UpdatePersonBody = zod.object({
   "name": zod.string().min(1).optional(),
   "notes": zod.string().optional(),
-  "descriptor": zod.string().optional().describe('Optional short label to distinguish same-named people')
+  "descriptor": zod.string().optional().describe('Optional short label to distinguish same-named people'),
+  "aliases": zod.array(zod.string()).optional(),
+  "birthday": zod.string().optional(),
+  "countryOfOrigin": zod.string().optional(),
+  "countryOfResidence": zod.string().optional(),
+  "howWeMet": zod.string().optional()
 })
 
 export const UpdatePersonResponse = zod.object({
@@ -281,6 +321,11 @@ export const UpdatePersonResponse = zod.object({
   "name": zod.string(),
   "notes": zod.string().nullish(),
   "descriptor": zod.string().nullish().describe('Optional short label to distinguish same-named people, e.g. \"Studentina\", \"climbing gym\"'),
+  "aliases": zod.array(zod.string()).describe('Alternate spellings this person is known by, e.g. \"Petja\" or \"Петя\" for \"Petya\". Mention detection matches against name and aliases.'),
+  "birthday": zod.string().nullish().describe('Free text so partial birthdays (\"October\") are possible, not just full dates'),
+  "countryOfOrigin": zod.string().nullish(),
+  "countryOfResidence": zod.string().nullish().describe('Left blank when the person still lives where they are from'),
+  "howWeMet": zod.string().nullish(),
   "createdAt": zod.coerce.date()
 })
 

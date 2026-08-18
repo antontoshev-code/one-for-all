@@ -404,7 +404,7 @@ components:
     # ── Person ───────────────────────────────────────────────────────────────
     Person:
       type: object
-      required: [id, name, createdAt]
+      required: [id, name, aliases, createdAt]
       properties:
         id:
           type: integer
@@ -415,6 +415,23 @@ components:
         descriptor:
           type: ["string", "null"]
           description: Optional short label to distinguish same-named people, e.g. "Studentina", "climbing gym"
+        aliases:
+          type: array
+          items:
+            type: string
+          description: >-
+            Alternate spellings this person is known by, e.g. "Petja" or "Петя"
+            for "Petya". Mention detection matches against name and aliases.
+        birthday:
+          type: ["string", "null"]
+          description: Free text so partial birthdays ("October") are possible, not just full dates
+        countryOfOrigin:
+          type: ["string", "null"]
+        countryOfResidence:
+          type: ["string", "null"]
+          description: Left blank when the person still lives where they are from
+        howWeMet:
+          type: ["string", "null"]
         createdAt:
           type: string
           format: date-time
@@ -442,6 +459,18 @@ components:
         descriptor:
           type: string
           description: Optional short label to distinguish same-named people
+        aliases:
+          type: array
+          items:
+            type: string
+        birthday:
+          type: string
+        countryOfOrigin:
+          type: string
+        countryOfResidence:
+          type: string
+        howWeMet:
+          type: string
 
     PersonUpdate:
       type: object
@@ -454,3 +483,15 @@ components:
         descriptor:
           type: string
           description: Optional short label to distinguish same-named people
+        aliases:
+          type: array
+          items:
+            type: string
+        birthday:
+          type: string
+        countryOfOrigin:
+          type: string
+        countryOfResidence:
+          type: string
+        howWeMet:
+          type: string

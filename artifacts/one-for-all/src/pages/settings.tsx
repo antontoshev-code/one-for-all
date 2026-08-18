@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTheme } from "next-themes";
 import {
   Trash2, AlertTriangle, Info, Loader2, Download,
   Shield, Mic, Sparkles, CheckCircle2, XCircle,
+  Palette, Sun, Moon, Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logEvent } from "@/lib/analytics";
@@ -31,6 +33,62 @@ function StatusRow({
         </span>
       </span>
     </div>
+  );
+}
+
+// ── Appearance ────────────────────────────────────────────────────────────
+
+const THEME_OPTIONS = [
+  { value: "light", label: "Light", Icon: Sun },
+  { value: "dark", label: "Dark", Icon: Moon },
+  { value: "system", label: "System", Icon: Monitor },
+] as const;
+
+function AppearanceSection() {
+  const { theme, setTheme } = useTheme();
+  // next-themes can't know the resolved theme until after mount; render the
+  // control in a neutral state until then so no option flashes as selected.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  return (
+    <section className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">
+      <div className="flex items-center gap-2 mb-3">
+        <Palette className="w-5 h-5 text-primary shrink-0" />
+        <h2 className="text-base font-semibold">Appearance</h2>
+      </div>
+      <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+        Choose how One for All looks. <strong className="text-foreground">System</strong> follows
+        your device setting and switches automatically.
+      </p>
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Colour theme">
+        {THEME_OPTIONS.map(({ value, label, Icon }) => {
+          const selected = mounted && theme === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setTheme(value);
+                logEvent("theme_changed");
+              }}
+              aria-pressed={selected}
+              className={[
+                "flex flex-col items-center justify-center gap-1.5 rounded-2xl px-3 py-4",
+                "text-sm font-medium transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                selected
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-muted-foreground hover:bg-secondary/80",
+              ].join(" ")}
+            >
+              <Icon className="w-5 h-5" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -108,6 +166,9 @@ export default function Settings() {
       </header>
 
       <div className="flex flex-col gap-5">
+
+        {/* ── Appearance ──────────────────────────────────────────────────── */}
+        <AppearanceSection />
 
         {/* ── AI Processing Status ────────────────────────────────────────── */}
         <section className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">
