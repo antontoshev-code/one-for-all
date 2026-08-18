@@ -12,7 +12,11 @@ import {
   UnlinkPersonFromEntryParams,
   ListEntriesQueryParams,
 } from "@workspace/api-zod";
+import OpenAI from "openai";
 
+// ---------------------------------------------------------------------------
+// Keyword heuristic — used as a fallback when LLM is unavailable or fails
+// ---------------------------------------------------------------------------
 const router: IRouter = Router();
 
 // ── Server-side dedup guard ───────────────────────────────────────────────
@@ -54,23 +58,19 @@ async function getEntryWithPeople(id: number) {
 
 // GET /entries — list, optionally filtered by category
 router.get("/entries", async (req, res): Promise<void> => {
-  const parsed = ListEntriesQueryParams.safeParse(req.query);
+  const parsed = LinkPersonToEntryBody.safeParse(req.body);
+
+      const validCategories = ["journal", "task", "idea", "log"] as const;
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
 
   try {
-    const rows = parsed.data.category
-      ? await db
-          .select()
-          .from(entriesTable)
-          .where(eq(entriesTable.category, parsed.data.category))
-          .orderBy(sql`${entriesTable.createdAt} desc`)
-      : await db
-          .select()
-          .from(entriesTable)
-          .orderBy(sql`${entriesTable.createdAt} desc`);
+    const rows = await db
+      .select({ category: entriesTable.category, count: sql<number>`count(*)::int` })
+      .from(entriesTable)
+      .groupBy(entriesTable.category);
 
     res.json(rows);
   } catch (err) {
@@ -80,7 +80,9 @@ router.get("/entries", async (req, res): Promise<void> => {
 
 // POST /entries — create
 router.post("/entries", async (req, res): Promise<void> => {
-  const parsed = CreateEntryBody.safeParse(req.body);
+  const parsed = LinkPersonToEntryBody.safeParse(req.body);
+
+      const validCategories = ["journal", "task", "idea", "log"] as const;
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
@@ -94,15 +96,9 @@ router.post("/entries", async (req, res): Promise<void> => {
   }
 
   try {
-    const [entry] = await db
-      .insert(entriesTable)
-      .values({
-        content: data.content,
-        captureType: data.captureType,
-        category: data.category ?? "inbox",
-        suggestedCategory: data.suggestedCategory ?? null,
-      })
-      .returning();
+  const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, params.data.id));
+
+  let category: "journal" | "task" | "idea" | "log";
 
     res.status(201).json(entry);
   } catch (err) {
@@ -143,13 +139,19 @@ router.get("/entries/stats", async (_req, res): Promise<void> => {
 
 // GET /entries/:id — single entry with people
 router.get("/entries/:id", async (req, res): Promise<void> => {
-  const params = GetEntryParams.safeParse(req.params);
+  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
   try {
+    await db
+      .delete(entryPeopleTable)
+      .where(
+        sql`${entryPeopleTable.entryId} = ${params.data.id} AND ${entryPeopleTable.personId} = ${params.data.personId}`,
+      );
+
     const entry = await getEntryWithPeople(params.data.id);
     if (!entry) {
       res.status(404).json({ error: "Entry not found" });
@@ -157,19 +159,21 @@ router.get("/entries/:id", async (req, res): Promise<void> => {
     }
     res.json(entry);
   } catch (err) {
-    res.status(500).json({ error: "Failed to get entry", detail: String(err) });
+    res.status(500).json({ error: "Failed to link person", detail: String(err) });
   }
 });
 
-// PATCH /entries/:id — update (categorize, toggle done, edit text)
-router.patch("/entries/:id", async (req, res): Promise<void> => {
-  const params = UpdateEntryParams.safeParse(req.params);
+// DELETE /entries/:id/people/:personId — unlink person
+router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> => {
+  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
-  const parsed = UpdateEntryBody.safeParse(req.body);
+  const parsed = LinkPersonToEntryBody.safeParse(req.body);
+
+      const validCategories = ["journal", "task", "idea", "log"] as const;
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
@@ -184,11 +188,9 @@ router.patch("/entries/:id", async (req, res): Promise<void> => {
   if (parsed.data.suggestedCategory != null) updates.suggestedCategory = parsed.data.suggestedCategory;
 
   try {
-    const [entry] = await db
-      .update(entriesTable)
-      .set(updates)
-      .where(eq(entriesTable.id, params.data.id))
-      .returning();
+  const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, params.data.id));
+
+  let category: "journal" | "task" | "idea" | "log";
 
     if (!entry) {
       res.status(404).json({ error: "Entry not found" });
@@ -200,9 +202,9 @@ router.patch("/entries/:id", async (req, res): Promise<void> => {
   }
 });
 
-// DELETE /entries/:id
-router.delete("/entries/:id", async (req, res): Promise<void> => {
-  const params = DeleteEntryParams.safeParse(req.params);
+// POST /entries/:id/suggest-category — LLM-based categorization with heuristic fallback
+router.post("/entries/:id/suggest-category", async (req, res): Promise<void> => {
+  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
@@ -218,13 +220,15 @@ router.delete("/entries/:id", async (req, res): Promise<void> => {
 
 // POST /entries/:id/people — link person
 router.post("/entries/:id/people", async (req, res): Promise<void> => {
-  const params = LinkPersonToEntryParams.safeParse(req.params);
+  const params = UnlinkPersonFromEntryParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
 
   const parsed = LinkPersonToEntryBody.safeParse(req.body);
+
+      const validCategories = ["journal", "task", "idea", "log"] as const;
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
@@ -274,3 +278,50 @@ router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> =
 });
 
 export default router;
+
+function heuristicCategorize(text: string): "journal" | "task" | "idea" | "log" {
+  const t = text.toLowerCase();
+  const taskWords = ["need to", "remind", "todo", "must", "should", "don't forget", "remember to", "have to", "call", "email", "schedule"];
+  if (taskWords.some((w) => t.includes(w))) return "task";
+  const ideaWords = ["idea", "what if", "concept", "maybe we could", "what about", "thinking about building", "could be interesting"];
+  if (ideaWords.some((w) => t.includes(w))) return "idea";
+  const logWords = ["did", "went", "finished", "completed", "ran", "worked out", "workout", "ate", "cooked", "watched", "read"];
+  if (logWords.some((w) => t.includes(w))) return "log";
+  return "journal";
+}
+
+  let reason: string;
+
+  let usedAI = false;
+
+function getOpenAIClient(): OpenAI | null {
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  if (!baseURL || !apiKey) return null;
+  return new OpenAI({ apiKey, baseURL });
+}
+
+      const text = response.choices[0]?.message?.content ?? "";
+
+  const client = getOpenAIClient();
+
+      const response = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        max_tokens: 120,
+        messages: [
+          {
+            role: "system",
+            content: `You are a personal note categorizer. Given a note, classify it into exactly one of these categories:
+- task: action items, todos, reminders, things still to be done
+- idea: creative thoughts, brainstorming, concepts, "what if" thoughts
+- log: past events, activities already completed, things that happened
+- journal: personal reflections, feelings, observations, general thoughts
+
+Respond with JSON only, no markdown: {"category": "<journal|task|idea|log>", "reason": "<10 words max explaining why>"}`,
+          },
+          {
+            role: "user",
+            content: entry.content,
+          },
+        ],
+      });

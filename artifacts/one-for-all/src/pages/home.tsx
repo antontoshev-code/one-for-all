@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle, CheckCircle2 } from "lucide-react";
-import { getMockTranscript, categorizeContent } from "@/lib/heuristics";
-import { transcribeAudio, categorizeTexts } from "@/lib/ai-api";
+import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { getMockTranscript } from "@/lib/heuristics";
+import { transcribeAudio } from "@/lib/ai-api";
 import { logEvent } from "@/lib/analytics";
 import { useToast } from "@/hooks/use-toast";
 import { useCreateEntry, useGetEntryStats, getGetEntryStatsQueryKey } from "@workspace/api-client-react";
@@ -101,39 +101,34 @@ export default function Home() {
 
   const handleSave = async () => {
     // ── Layer 1: synchronous ref lock (beats React's async re-render) ────────
-    // All subsequent clicks are ignored until the lock is released.
     if (submittingRef.current) return;
     if (!content.trim()) return;
 
     submittingRef.current = true;  // SET BEFORE any await — this is the guard
-    setIsSaving(true);             // drives visual disabled + spinner (async, that's fine)
+    setIsSaving(true);
     setSaveError(false);
 
-    // ── Step 1: AI categorisation (best-effort, non-blocking on failure) ─────
-    let suggestedCategory = categorizeContent(content);
+    // ── Step 1: persist ───────────────────────────────────────────────────────
     try {
-      const { categories, source } = await categorizeTexts([content]);
-      if (source !== "error" && categories[0]) {
-        suggestedCategory = categories[0];
-      }
-    } catch {
-      // keep heuristic
-    }
-
-    // ── Step 2: persist ──────────────────────────────────────────────────────
-    try {
-      await createEntry.mutateAsync({
+      const entry = await createEntry.mutateAsync({
         data: {
           content,
           captureType: mode === "text" ? "text" : "voice",
-          suggestedCategory,
         },
       });
+
+      // ── Step 2: AI categorisation via server endpoint (non-blocking on failure)
+      // The /api/entries/:id/suggest-category endpoint runs LLM inference server-side
+      // with a keyword-heuristic fallback, then persists suggestedCategory on the entry.
+      try {
+        await fetch(`/api/entries/${entry.id}/suggest-category`, { method: "POST" });
+      } catch (err) {
+        console.error("suggest-category failed (non-fatal):", err);
+      }
 
       queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() });
       logEvent("capture_created", {
         captureType: mode === "text" ? "text" : "voice",
-        suggestedCategory,
       });
 
       toast({ title: "Saved to Inbox ✓" });
