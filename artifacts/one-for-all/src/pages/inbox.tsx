@@ -223,14 +223,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
       if (!data.units || data.units.length === 0) throw new Error('empty response');
 
-      if (data.units.length === 1) {
-        // Single unified thought — stay in single-category flow with AI's category
-        setLocalSuggestedCat(data.units[0].category as Category);
-        setIsSplitLoading(false);
-        return;
-      }
-
-      // Multiple thoughts — resolve people and build SplitPieces
+      // Build SplitPieces for all units (including single-unit — user can still confirm)
       const pieces: SplitPiece[] = data.units.map(unit => {
         let nameDetection: NameDetectionResult = {};
 
