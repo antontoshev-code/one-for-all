@@ -5,7 +5,12 @@
     "tsBuildInfoFile": ".tsbuildinfo",
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": ["node"],
+    // Tests import with an explicit .ts extension so `node --test` can run them
+    // directly through Node 24's type stripping — no build step, no test-runner
+    // dependency. The build is esbuild from src/index.ts, which never reaches
+    // them, and typecheck runs with --noEmit.
+    "allowImportingTsExtensions": true
   },
   "include": ["src"],
   "references": [

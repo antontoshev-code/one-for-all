@@ -5,6 +5,7 @@ import {
   entriesTable, peopleTable, capturesTable, isNull, eq, sql,
 } from "@workspace/db";
 import { logger } from "./logger";
+import { resolvePublicOrigins } from "./public-origin";
 
 /**
  * BETTER_AUTH_SECRET signs session tokens. Without a stable value every
@@ -26,8 +27,22 @@ if (!googleEnabled) {
   logger.warn("GOOGLE_CLIENT_ID/SECRET not set — Google sign-in is hidden; email sign-in still works");
 }
 
+const origins = resolvePublicOrigins();
+
+/**
+ * Logged at startup because every failure mode here looks like something else.
+ * A wrong origin surfaces as a bare "forbidden" on sign-in, or as Google's
+ * redirect_uri_mismatch, neither of which points at the cause. One line in the
+ * boot log turns both into a five-second diagnosis.
+ */
+logger.info(
+  { baseURL: origins.baseURL ?? "(derived per request)", source: origins.source, trustedOrigins: origins.trustedOrigins },
+  "Resolved public origin",
+);
+
 export const auth = betterAuth({
   secret,
+  baseURL: origins.baseURL,
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
@@ -46,7 +61,15 @@ export const auth = betterAuth({
   socialProviders: googleEnabled
     ? { google: { clientId: googleId!, clientSecret: googleSecret! } }
     : {},
-  trustedOrigins: process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : undefined,
+  // Empty means "derive from baseURL" — never "trust everything".
+  trustedOrigins: origins.trustedOrigins.length ? origins.trustedOrigins : undefined,
+  advanced: {
+    // Replit terminates TLS at its proxy, so without this the server sees a
+    // plain-http internal URL and builds an http:// callback that Google
+    // rejects. Safe here because the proxy overwrites these headers on the way
+    // in; they are a fallback for baseURL only, and never widen trustedOrigins.
+    trustedProxyHeaders: true,
+  },
 });
 
 /**

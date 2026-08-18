@@ -47,3 +47,10 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Downloaded OAuth client credentials. These arrive in the repo root by default
+# when you use "Download JSON" in the Google console, and a single `git add -A`
+# would publish a live secret. Never commit them — the values belong in Replit
+# Secrets, not in version control.
+client_secret_*.json
+*.credentials.json

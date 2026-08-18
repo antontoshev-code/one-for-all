@@ -3,7 +3,7 @@ import multer from "multer";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
-import { aiRateLimit, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
+import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ function heuristicSplit(text: string): string[] {
 // Accepts multipart/form-data with field "audio".
 // Returns { transcript, source: 'whisper' | 'unavailable' | 'error' }.
 
-router.post("/ai/transcribe", aiRateLimit, upload.single("audio"), async (req, res) => {
+router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
@@ -144,7 +144,7 @@ router.post("/ai/transcribe", aiRateLimit, upload.single("audio"), async (req, r
 // Body: { texts: string[] }
 // Returns { categories: Category[], source: 'claude' | 'heuristic' }.
 
-router.post("/ai/categorize", aiRateLimit, async (req, res) => {
+router.post("/ai/categorize", aiQuota, async (req, res) => {
   const { texts } = req.body as { texts: string[] };
 
   if (!Array.isArray(texts) || texts.length === 0) {
@@ -232,7 +232,7 @@ router.post("/ai/categorize", aiRateLimit, async (req, res) => {
 // Body: { texts: string[] }
 // Returns { names: (string | null)[], source: 'claude' | 'unavailable' | 'error' }.
 
-router.post("/ai/detect-names", aiRateLimit, async (req, res) => {
+router.post("/ai/detect-names", aiQuota, async (req, res) => {
   const { texts } = req.body as { texts: string[] };
 
   if (!Array.isArray(texts) || texts.length === 0) {
@@ -319,7 +319,7 @@ Rules:
 // Returns: { units: Array<{ text, category, people: string[] }>, source: 'claude'|'heuristic' }
 // Falls back to punctuation splitting + heuristic categorization if Claude is unavailable.
 
-router.post("/ai/split", aiRateLimit, async (req, res) => {
+router.post("/ai/split", aiQuota, async (req, res) => {
   const { text } = req.body as { text?: string };
 
   if (!text?.trim()) {

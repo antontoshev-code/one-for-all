@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { signOut } from "@/lib/auth-client";
+import { signOut, getSession, type AuthUser } from "@/lib/auth-client";
 import {
   Trash2, AlertTriangle, Info, Loader2, Download,
   Shield, Mic, Sparkles, CheckCircle2, XCircle,
-  Palette, Sun, Moon, Monitor, LogOut,
+  Palette, Sun, Moon, Monitor, LogOut, UserX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { logEvent } from "@/lib/analytics";
 
 // ── AI Status ─────────────────────────────────────────────────────────────
@@ -89,6 +90,101 @@ function AppearanceSection() {
           );
         })}
       </div>
+    </section>
+  );
+}
+
+// ── Delete account ────────────────────────────────────────────────────────
+
+/**
+ * Erasing the account, as distinct from emptying it.
+ *
+ * Gated behind typing the account's own email rather than a generic "are you
+ * sure". Every other destructive control here is recoverable from an export;
+ * this one takes the account with it, so the confirmation is deliberately
+ * something you cannot do by reflex.
+ */
+function DeleteAccountSection() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [armed, setArmed] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+
+  useEffect(() => { void getSession().then(setUser); }, []);
+
+  // Case-insensitive: the address is a confirmation, not a password, and
+  // failing someone for capitalising their own email would just be rude.
+  const confirmed = Boolean(user?.email) &&
+    typed.trim().toLowerCase() === user!.email.toLowerCase();
+
+  const handleDelete = async () => {
+    setBusy(true);
+    setError(false);
+    try {
+      const res = await fetch("/api/data/account", { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      logEvent("account_deleted");
+      // Straight out of the app: the session is gone, so every subsequent
+      // request would 401 and the UI would look broken rather than finished.
+      window.location.href = "/";
+    } catch {
+      setError(true);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="bg-destructive/5 border border-destructive/20 rounded-3xl p-5">
+      <h2 className="text-base font-semibold text-destructive flex items-center gap-2 mb-2">
+        <UserX className="w-5 h-5 shrink-0" /> Delete my account
+      </h2>
+      <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+        Closes the account itself and erases everything in it — entries, people,
+        recordings and your sign-in. Nothing is kept, and it cannot be restored
+        afterwards. Export first if you want a copy.
+      </p>
+
+      {error && (
+        <p className="text-sm text-destructive mb-3">Something went wrong. Please try again.</p>
+      )}
+
+      {!armed ? (
+        <Button variant="destructive" className="rounded-full w-full" onClick={() => setArmed(true)}>
+          <UserX className="w-4 h-4 mr-2" />
+          Delete my account
+        </Button>
+      ) : (
+        <div className="flex flex-col gap-3 animate-in fade-in">
+          <label className="text-sm text-destructive leading-relaxed">
+            Type <strong>{user?.email ?? "your email"}</strong> to confirm.
+          </label>
+          <Input
+            value={typed}
+            onChange={e => setTyped(e.target.value)}
+            placeholder={user?.email ?? "your email"}
+            autoComplete="off"
+            className="h-11 bg-background"
+          />
+          <Button
+            variant="destructive"
+            className="rounded-full w-full"
+            onClick={handleDelete}
+            disabled={!confirmed || busy}
+          >
+            {busy && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+            Permanently delete my account
+          </Button>
+          <Button
+            variant="outline"
+            className="rounded-full w-full"
+            onClick={() => { setArmed(false); setTyped(""); }}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
     </section>
   );
 }
@@ -353,6 +449,9 @@ export default function Settings() {
             </div>
           )}
         </section>
+
+        {/* ── Delete account ──────────────────────────────────────────────── */}
+        <DeleteAccountSection />
 
       </div>
     </div>

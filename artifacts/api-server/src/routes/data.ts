@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   db, inArray, eq,
   entriesTable, peopleTable, entryPeopleTable, capturesTable, captureEntriesTable,
+  userTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 
@@ -86,6 +87,45 @@ router.post("/data/clear", async (req, res) => {
   } catch (err) {
     logger.error({ err }, "Clear all data failed");
     res.status(500).json({ error: "Failed to clear data" });
+  }
+});
+
+/**
+ * DELETE /data/account — erase the account and everything in it.
+ *
+ * Required rather than optional: GDPR gives a right to erasure, and Apple will
+ * not accept an app that creates accounts without an in-app way to delete them.
+ * "Clear all data" above is not the same thing — it empties the diary but keeps
+ * the account, which is what you want after a bad import, not when you want out.
+ *
+ * One statement, because every table that holds anything personal cascades from
+ * the user row: entries, people and captures directly; entry_people and
+ * capture_entries through their parents; ai_usage, sessions and OAuth accounts
+ * directly. Doing it by hand instead would mean a list that silently goes stale
+ * the next time a table is added.
+ */
+router.delete("/data/account", async (req, res) => {
+  try {
+    const deleted = await db
+      .delete(userTable)
+      .where(eq(userTable.id, req.userId))
+      .returning({ id: userTable.id });
+
+    if (deleted.length === 0) {
+      // The session outlived its user. Nothing to erase, and saying "not found"
+      // would read as a failure when the desired end state already holds.
+      logger.warn({ userId: req.userId }, "Account deletion for a user that no longer exists");
+    } else {
+      logger.info({ userId: req.userId }, "Account and all its data deleted");
+    }
+
+    // Sessions cascade with the user, so the cookie is already dead. Clear it
+    // anyway so the browser isn't left presenting a token to every request.
+    res.clearCookie("better-auth.session_token", { path: "/" });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Account deletion failed");
+    res.status(500).json({ error: "Failed to delete the account" });
   }
 });
 
