@@ -11,9 +11,9 @@ import { ArrowLeft } from "lucide-react";
  * this page has to change in the same commit — a policy that describes an
  * older version of the app is worse than none.
  *
- * The bracketed placeholders are deliberate and must be filled in before anyone
- * outside the beta uses this. They are the legally identifying bits, and they
- * are the one thing that cannot be derived from the code.
+ * The controller name, contact address and date came from Anton directly —
+ * they are the only parts that cannot be derived from the code. If the
+ * controlling entity ever changes, this is the page that has to change with it.
  */
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -50,8 +50,8 @@ export default function Privacy() {
 
       <Section title="Who is responsible">
         <p>
-          The data controller is <strong>[YOUR FULL NAME OR COMPANY]</strong>,
-          contactable at <strong>[YOUR CONTACT EMAIL]</strong>. If you want a copy of
+          The data controller is <strong>AKT Education</strong>,
+          contactable at <strong>anton.k.toshev@gmail.com</strong>. If you want a copy of
           your data, a correction, or deletion, that address reaches a person.
         </p>
       </Section>
@@ -146,7 +146,7 @@ export default function Privacy() {
       <Section title="Changes">
         <p>
           If what the app does with your data changes, this page changes with it.
-          Last updated <strong>[DATE]</strong>.
+          Last updated <strong>19 August 2026</strong>.
         </p>
       </Section>
     </div>
