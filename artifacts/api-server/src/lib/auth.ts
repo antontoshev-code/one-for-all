@@ -63,6 +63,26 @@ export const auth = betterAuth({
     : {},
   // Empty means "derive from baseURL" — never "trust everything".
   trustedOrigins: origins.trustedOrigins.length ? origins.trustedOrigins : undefined,
+  account: {
+    accountLinking: {
+      /**
+       * Sign in with Google using an address that already has a password
+       * account, and land in the same account rather than a new empty one.
+       *
+       * Without this the two are separate users, so someone who signed up with
+       * a password in March and pressed "Continue with Google" in April would
+       * find their diary apparently gone — the worst possible impression, and
+       * indistinguishable from data loss.
+       *
+       * Only Google is trusted for this, because linking on a matching email
+       * address is only safe when the provider actually verifies the address.
+       * Trusting a provider that does not would let anyone claim an account by
+       * signing up elsewhere with someone else's email.
+       */
+      enabled: true,
+      trustedProviders: ["google"],
+    },
+  },
   advanced: {
     // Replit terminates TLS at its proxy, so without this the server sees a
     // plain-http internal URL and builds an http:// callback that Google
