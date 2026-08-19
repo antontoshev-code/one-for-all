@@ -313,6 +313,7 @@ export default function Home() {
           <div className="flex flex-col items-center gap-14 animate-in fade-in zoom-in duration-500">
             <button
               onClick={handleStartRecording}
+              aria-label="Start voice recording"
               className="relative group flex items-center justify-center w-40 h-40 rounded-full bg-primary text-primary-foreground shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95 transition-all duration-300"
             >
               <div className="absolute inset-0 rounded-full bg-primary/20 scale-[1.3] opacity-0 group-hover:opacity-100 group-hover:scale-[1.5] transition-all duration-700" />
@@ -344,6 +345,7 @@ export default function Home() {
 
             <button
               onClick={handleStopRecording}
+              aria-label="Stop voice recording"
               className="flex items-center justify-center w-20 h-20 rounded-full bg-foreground text-background shadow-lg hover:scale-105 active:scale-95 transition-all"
             >
               <Square className="w-8 h-8 fill-current" />
