@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { Mic, Square, PenLine, Loader2, Sparkles, AlertCircle } from "lucide-react";
 import { transcribeAudio } from "@/lib/ai-api";
 import { logEvent } from "@/lib/analytics";
@@ -29,6 +29,18 @@ const SpeechRecognitionAPI: WebSpeechRecognitionCtor | null =
     ((window as unknown as { SpeechRecognition?: WebSpeechRecognitionCtor }).SpeechRecognition ||
      (window as unknown as { webkitSpeechRecognition?: WebSpeechRecognitionCtor }).webkitSpeechRecognition)) ||
   null;
+
+/**
+ * The four counters, each a link to the list it counts. They read as a summary,
+ * so people tap them expecting to get there — a number that looks clickable and
+ * isn't is a small lie repeated on every visit.
+ */
+const COUNTERS = [
+  { href: "/journal", label: "Journal", key: "journal" },
+  { href: "/tasks", label: "Tasks", key: "task" },
+  { href: "/ideas", label: "Ideas", key: "idea" },
+  { href: "/log", label: "Log", key: "log" },
+] as const;
 
 export default function Home() {
   const [mode, setMode] = useState<"idle" | "recording" | "transcribing" | "editing" | "text">("idle");
@@ -469,22 +481,18 @@ export default function Home() {
 
       {mode === "idle" && (
         <div className="mt-12 grid grid-cols-4 gap-2 text-center opacity-70">
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xl font-medium">{stats?.journal || 0}</span>
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Journal</span>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xl font-medium">{stats?.task || 0}</span>
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Tasks</span>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xl font-medium">{stats?.idea || 0}</span>
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Ideas</span>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xl font-medium">{stats?.log || 0}</span>
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Log</span>
-          </div>
+          {COUNTERS.map(({ href, label, key }) => (
+            <Link
+              key={href}
+              href={href}
+              className="flex flex-col items-center gap-1 rounded-2xl py-2 transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              <span className="text-xl font-medium">{stats?.[key] || 0}</span>
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+                {label}
+              </span>
+            </Link>
+          ))}
         </div>
       )}
     </div>

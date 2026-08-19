@@ -421,8 +421,8 @@ export default function PersonDetail() {
               <AlertDialogDescription asChild>
                 <div className="space-y-3 text-left">
                   <p>
-                    This is everything the app holds about {person.name}. Deleting it is
-                    permanent — there is no undo.
+                    This is everything the app holds about {person.name}. Deleting it is{" "}
+                    <strong className="text-foreground">permanent</strong> — there is no undo.
                   </p>
 
                   <div className="rounded-2xl bg-muted/60 px-3 py-2.5 text-sm">

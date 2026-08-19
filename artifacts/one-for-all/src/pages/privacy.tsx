@@ -50,9 +50,13 @@ export default function Privacy() {
 
       <Section title="Who is responsible">
         <p>
-          The data controller is <strong>AKT Education</strong>,
-          contactable at <strong>anton.k.toshev@gmail.com</strong>. If you want a copy of
-          your data, a correction, or deletion, that address reaches a person.
+          The data controller is <strong>AKT Education</strong>. You do not need to ask
+          anyone to see, correct, or delete your data — every one of those is a button in
+          the app, and the next section says where.
+        </p>
+        <p>
+          If something isn't working, or you want to ask a question the app can't answer,
+          write to <strong>anton.k.toshev@gmail.com</strong>.
         </p>
       </Section>
 
@@ -113,17 +117,42 @@ export default function Privacy() {
         </p>
       </Section>
 
-      <Section title="Your rights">
+      <Section title="Your rights, and how to use them">
         <p>
-          You can see everything held about you by exporting it from Settings — it
-          comes out as a plain JSON file, not a summary. You can correct anything by
-          editing it. You can delete your entries with "Clear all my data", or close
-          the account entirely with "Delete my account", which erases the account and
-          everything in it and cannot be reversed.
+          You don't have to request any of this. Each one takes a few seconds, and none of
+          it waits on anybody.
         </p>
         <p>
-          If you are in the UK or EU, you also have the right to complain to your
-          national data protection authority.
+          <strong className="text-foreground">To get a copy of everything:</strong>{" "}
+          Settings → <em>Export my data</em>. You get a JSON file containing every entry,
+          every person and every capture exactly as stored — the real records, not a summary.
+        </p>
+        <p>
+          <strong className="text-foreground">To correct something:</strong>{" "}
+          Open the entry or the person and edit it. Changes save immediately.
+        </p>
+        <p>
+          <strong className="text-foreground">To delete what you've written but keep your
+          account:</strong>{" "}
+          Settings → <em>Clear all my data</em>.
+        </p>
+        <p>
+          <strong className="text-foreground">To delete everything, account included:</strong>{" "}
+          Settings → <em>Delete my account</em>. You confirm by typing your email address.
+          It erases your entries, your people, your usage history and your sign-in, and it
+          cannot be reversed. Export first if you want to keep a copy.
+        </p>
+        <p>
+          <strong className="text-foreground">To remove what's recorded about someone
+          else:</strong>{" "}
+          Open their profile and delete it. You'll see exactly what is held about them
+          before you confirm.
+        </p>
+        <p>
+          If you are in the UK or EU you also have a statutory right to complain to your
+          national data protection authority. That right exists by law and cannot be
+          signed away by agreeing to any terms — including these. It is there in case a
+          service mishandles your data, not because we expect you to need it.
         </p>
       </Section>
 

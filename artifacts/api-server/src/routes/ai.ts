@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
+import { db, eq, peopleTable } from "@workspace/db";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,53 @@ function heuristicSplit(text: string): string[] {
 // Accepts multipart/form-data with field "audio".
 // Returns { transcript, source: 'whisper' | 'unavailable' | 'error' }.
 
+/**
+ * Build a vocabulary hint for Whisper from the names this user already keeps.
+ *
+ * Whisper accepts a short prompt that biases decoding toward the words in it.
+ * Proper nouns are exactly what it gets wrong — a Bulgarian capture came back
+ * with "Пълночално" for "Първоначално" and invented plausible-sounding names
+ * for real ones — and the people someone writes about are both the highest-value
+ * words to get right and the ones no general model can know.
+ *
+ * Sent to the same provider that is already receiving the audio, and drawn only
+ * from the caller's own rows, so this discloses nothing new. The 700-character
+ * cap keeps it inside Whisper's ~224-token prompt window; beyond that the tail
+ * is ignored, so spending it on the most recently updated people is better than
+ * letting it truncate arbitrarily.
+ */
+async function vocabularyHint(userId: string): Promise<string | undefined> {
+  try {
+    const people = await db
+      .select({ name: peopleTable.name, aliases: peopleTable.aliases })
+      .from(peopleTable)
+      .where(eq(peopleTable.userId, userId));
+
+    const words = [...new Set(people.flatMap(p => [p.name, ...(p.aliases ?? [])]))]
+      .map(w => w.trim())
+      .filter(Boolean);
+
+    if (words.length === 0) return undefined;
+
+    let hint = "";
+    for (const word of words) {
+      const next = hint ? `${hint}, ${word}` : word;
+      if (next.length > 700) break;
+      hint = next;
+    }
+
+    // Phrased as prose rather than a bare list: Whisper conditions on the
+    // prompt as if it were preceding speech, so a natural sentence biases
+    // better than a comma-separated dump.
+    return `Names that may be mentioned: ${hint}.`;
+  } catch (err) {
+    // A vocabulary hint is an improvement, not a requirement. Losing it must
+    // never cost the user their recording.
+    logger.warn({ err }, "Could not build vocabulary hint — transcribing without it");
+    return undefined;
+  }
+}
+
 router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -102,11 +150,17 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     // empty string — it emits memorised training fragments (Korean news
     // sign-offs, "thanks for watching"), which in a diary is worse than
     // returning nothing at all.
+    const prompt = await vocabularyHint(req.userId);
+
     const result = await openai.audio.transcriptions.create({
       file: audioFile,
       model: "whisper-1",
       response_format: "verbose_json",
       temperature: 0,
+      // No `language` is set on purpose. Captures mix Bulgarian and English
+      // freely — "Trello", "Brighteye" inside a Bulgarian sentence — and
+      // pinning the language makes Whisper force those into Cyrillic.
+      ...(prompt ? { prompt } : {}),
     });
 
     const verbose = result as unknown as {
