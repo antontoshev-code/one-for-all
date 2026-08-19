@@ -267,6 +267,30 @@ export default function PersonDetail() {
     );
   };
 
+  /**
+   * What deletion actually destroys, spelled out before it happens.
+   *
+   * These are notes about someone who never agreed to being recorded here, so
+   * "delete this person" has to be something you can carry out with confidence
+   * rather than a button you press and hope about. Listing the stored fields by
+   * name also makes it obvious when the app is holding more than expected.
+   */
+  const linkedEntries = (person as { entries?: { id: number; content: string }[] } | undefined)?.entries ?? [];
+
+  const storedFacts = person
+    ? ([
+        [person.descriptor, "How you tell them apart"],
+        [person.notes, "Your notes about them"],
+        [person.howWeMet, "How you met"],
+        [person.birthday, "Their birthday"],
+        [person.countryOfOrigin, "Where they're from"],
+        [person.countryOfResidence, "Where they live"],
+        [person.aliases?.length ? "y" : "", `Other names you call them (${person.aliases?.length ?? 0})`],
+      ] as const)
+        .filter(([value]) => Boolean(value))
+        .map(([, label]) => label)
+    : [];
+
   const handleDelete = () => {
     if (!person) return;
     deletePerson.mutate({ id: person.id }, {
@@ -394,9 +418,47 @@ export default function PersonDetail() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete {person.name}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This removes the person profile. Linked entries will remain but the link will be
-                removed. This cannot be undone.
+              <AlertDialogDescription asChild>
+                <div className="space-y-3 text-left">
+                  <p>
+                    This is everything the app holds about {person.name}. Deleting it is
+                    permanent — there is no undo.
+                  </p>
+
+                  <div className="rounded-2xl bg-muted/60 px-3 py-2.5 text-sm">
+                    <p className="font-medium text-foreground mb-1">Will be erased</p>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      {storedFacts.length > 0
+                        ? storedFacts.map(f => <li key={f}>{f}</li>)
+                        : <li>Their name, and nothing else</li>}
+                    </ul>
+                  </div>
+
+                  <div className="rounded-2xl bg-muted/60 px-3 py-2.5 text-sm">
+                    <p className="font-medium text-foreground mb-1">Will be kept</p>
+                    {linkedEntries.length === 0 ? (
+                      <p>No entries mention them.</p>
+                    ) : (
+                      <>
+                        <p className="mb-1.5">
+                          {linkedEntries.length} {linkedEntries.length === 1 ? "entry" : "entries"}{" "}
+                          you wrote. The words stay exactly as they are — only the link to this
+                          profile goes.
+                        </p>
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {linkedEntries.slice(0, 3).map(e => (
+                            <li key={e.id} className="truncate">{e.content}</li>
+                          ))}
+                          {linkedEntries.length > 3 && (
+                            <li className="text-muted-foreground">
+                              and {linkedEntries.length - 3} more
+                            </li>
+                          )}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

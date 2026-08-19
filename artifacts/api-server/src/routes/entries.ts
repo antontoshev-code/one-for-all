@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, inArray, and, or, isNull } from "drizzle-orm";
-import { db, entriesTable, peopleTable, entryPeopleTable } from "@workspace/db";
+import { eq, sql, inArray, and, or, isNull, db, entriesTable, peopleTable, entryPeopleTable } from "@workspace/db";
 import {
   CreateEntryBody,
   UpdateEntryBody,
@@ -12,7 +11,6 @@ import {
   UnlinkPersonFromEntryParams,
   ListEntriesQueryParams,
 } from "@workspace/api-zod";
-import OpenAI from "openai";
 
 const router: IRouter = Router();
 
@@ -33,8 +31,11 @@ function isDuplicate(content: string): boolean {
 }
 
 // Helper: fetch entry with its linked people
-async function getEntryWithPeople(id: number) {
-  const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, id));
+async function getEntryWithPeople(id: number, userId: string) {
+  const [entry] = await db
+    .select()
+    .from(entriesTable)
+    .where(and(eq(entriesTable.id, id), eq(entriesTable.userId, userId)));
   if (!entry) return null;
 
   const links = await db
@@ -47,7 +48,10 @@ async function getEntryWithPeople(id: number) {
     people = await db
       .select()
       .from(peopleTable)
-      .where(inArray(peopleTable.id, links.map((l) => l.personId)));
+      .where(and(
+        inArray(peopleTable.id, links.map((l) => l.personId)),
+        eq(peopleTable.userId, userId),
+      ));
   }
 
   return { ...entry, people };
@@ -66,11 +70,15 @@ router.get("/entries", async (req, res): Promise<void> => {
       ? await db
           .select()
           .from(entriesTable)
-          .where(eq(entriesTable.category, parsed.data.category))
+          .where(and(
+            eq(entriesTable.category, parsed.data.category),
+            eq(entriesTable.userId, req.userId),
+          ))
           .orderBy(sql`${entriesTable.createdAt} desc`)
       : await db
           .select()
           .from(entriesTable)
+          .where(eq(entriesTable.userId, req.userId))
           .orderBy(sql`${entriesTable.createdAt} desc`);
 
     res.json(rows);
@@ -98,6 +106,7 @@ router.post("/entries", async (req, res): Promise<void> => {
     const [entry] = await db
       .insert(entriesTable)
       .values({
+        userId: req.userId,
         content: data.content,
         captureType: data.captureType,
         category: data.category ?? "inbox",
@@ -113,11 +122,12 @@ router.post("/entries", async (req, res): Promise<void> => {
 
 // GET /entries/stats — per-category counts
 // Task count = open tasks only (isTaskDone false/null) so Home badge hits 0 when all tasks are done.
-router.get("/entries/stats", async (_req, res): Promise<void> => {
+router.get("/entries/stats", async (req, res): Promise<void> => {
   try {
     const rows = await db
       .select({ category: entriesTable.category, count: sql<number>`count(*)::int` })
       .from(entriesTable)
+      .where(eq(entriesTable.userId, req.userId))
       .groupBy(entriesTable.category);
 
     const counts: Record<string, number> = { inbox: 0, journal: 0, task: 0, idea: 0, log: 0 };
@@ -130,6 +140,7 @@ router.get("/entries/stats", async (_req, res): Promise<void> => {
       .select({ count: sql<number>`count(*)::int` })
       .from(entriesTable)
       .where(and(
+        eq(entriesTable.userId, req.userId),
         eq(entriesTable.category, "task"),
         or(eq(entriesTable.isTaskDone, false), isNull(entriesTable.isTaskDone)),
       ));
@@ -151,7 +162,7 @@ router.get("/entries/:id", async (req, res): Promise<void> => {
   }
 
   try {
-    const entry = await getEntryWithPeople(params.data.id);
+    const entry = await getEntryWithPeople(params.data.id, req.userId);
     if (!entry) {
       res.status(404).json({ error: "Entry not found" });
       return;
@@ -188,7 +199,7 @@ router.patch("/entries/:id", async (req, res): Promise<void> => {
     const [entry] = await db
       .update(entriesTable)
       .set(updates)
-      .where(eq(entriesTable.id, params.data.id))
+      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId)))
       .returning();
 
     if (!entry) {
@@ -210,7 +221,9 @@ router.delete("/entries/:id", async (req, res): Promise<void> => {
   }
 
   try {
-    await db.delete(entriesTable).where(eq(entriesTable.id, params.data.id));
+    await db
+      .delete(entriesTable)
+      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId)));
     res.sendStatus(204);
   } catch (err) {
     res.status(500).json({ error: "Failed to delete entry", detail: String(err) });
@@ -232,12 +245,26 @@ router.post("/entries/:id/people", async (req, res): Promise<void> => {
   }
 
   try {
+    const [ownedEntry] = await db
+      .select({ id: entriesTable.id })
+      .from(entriesTable)
+      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId)));
+    const [ownedPerson] = await db
+      .select({ id: peopleTable.id })
+      .from(peopleTable)
+      .where(and(eq(peopleTable.id, parsed.data.personId), eq(peopleTable.userId, req.userId)));
+
+    if (!ownedEntry || !ownedPerson) {
+      res.status(404).json({ error: "Entry or person not found" });
+      return;
+    }
+
     await db
       .insert(entryPeopleTable)
       .values({ entryId: params.data.id, personId: parsed.data.personId })
       .onConflictDoNothing();
 
-    const entry = await getEntryWithPeople(params.data.id);
+    const entry = await getEntryWithPeople(params.data.id, req.userId);
     if (!entry) {
       res.status(404).json({ error: "Entry not found" });
       return;
@@ -263,7 +290,7 @@ router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> =
         sql`${entryPeopleTable.entryId} = ${params.data.id} AND ${entryPeopleTable.personId} = ${params.data.personId}`,
       );
 
-    const entry = await getEntryWithPeople(params.data.id);
+    const entry = await getEntryWithPeople(params.data.id, req.userId);
     if (!entry) {
       res.status(404).json({ error: "Entry not found" });
       return;
@@ -275,98 +302,3 @@ router.delete("/entries/:id/people/:personId", async (req, res): Promise<void> =
 });
 
 export default router;
-
-// ---------------------------------------------------------------------------
-// Categorization: LLM-based with keyword-heuristic fallback
-// ---------------------------------------------------------------------------
-function heuristicCategorize(text: string): "journal" | "task" | "idea" | "log" {
-  const t = text.toLowerCase();
-  const taskWords = ["need to", "remind", "todo", "must", "should", "don't forget", "remember to", "have to", "call", "email", "schedule"];
-  if (taskWords.some((w) => t.includes(w))) return "task";
-  const ideaWords = ["idea", "what if", "concept", "maybe we could", "what about", "thinking about building", "could be interesting"];
-  if (ideaWords.some((w) => t.includes(w))) return "idea";
-  const logWords = ["did", "went", "finished", "completed", "ran", "worked out", "workout", "ate", "cooked", "watched", "read"];
-  if (logWords.some((w) => t.includes(w))) return "log";
-  return "journal";
-}
-
-function getOpenAIClient(): OpenAI | null {
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!baseURL || !apiKey) return null;
-  return new OpenAI({ apiKey, baseURL });
-}
-
-// POST /entries/:id/suggest-category — LLM categorization, heuristic fallback
-router.post("/entries/:id/suggest-category", async (req, res): Promise<void> => {
-  const params = GetEntryParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  try {
-    const [entry] = await db.select().from(entriesTable).where(eq(entriesTable.id, params.data.id));
-    if (!entry) {
-      res.status(404).json({ error: "Entry not found" });
-      return;
-    }
-
-    const validCategories = ["journal", "task", "idea", "log"] as const;
-    let category: "journal" | "task" | "idea" | "log";
-    let reason: string;
-    let usedAI = false;
-
-    const client = getOpenAIClient();
-    if (client) {
-      try {
-        const response = await client.chat.completions.create({
-          model: "gpt-4o-mini",
-          max_tokens: 120,
-          messages: [
-            {
-              role: "system",
-              content: `You are a personal note categorizer. Given a note, classify it into exactly one of these categories:
-- task: action items, todos, reminders, things still to be done
-- idea: creative thoughts, brainstorming, concepts, "what if" thoughts
-- log: past events, activities already completed, things that happened
-- journal: personal reflections, feelings, observations, general thoughts
-
-Respond with JSON only, no markdown: {"category": "<journal|task|idea|log>", "reason": "<10 words max explaining why>"}`,
-            },
-            { role: "user", content: entry.content },
-          ],
-        });
-        const text = response.choices[0]?.message?.content ?? "";
-        const parsedJson = JSON.parse(text.replace(/```json|```/g, "").trim()) as {
-          category?: string;
-          reason?: string;
-        };
-        if (parsedJson.category && (validCategories as readonly string[]).includes(parsedJson.category)) {
-          category = parsedJson.category as (typeof validCategories)[number];
-          reason = parsedJson.reason ?? "AI categorization";
-          usedAI = true;
-        } else {
-          category = heuristicCategorize(entry.content);
-          reason = "Keyword heuristic (AI returned invalid category)";
-        }
-      } catch {
-        category = heuristicCategorize(entry.content);
-        reason = "Keyword heuristic (AI unavailable)";
-      }
-    } else {
-      category = heuristicCategorize(entry.content);
-      reason = "Keyword heuristic (AI not configured)";
-    }
-
-    const [updated] = await db
-      .update(entriesTable)
-      .set({ suggestedCategory: category, updatedAt: new Date() })
-      .where(eq(entriesTable.id, params.data.id))
-      .returning();
-
-    res.json({ ...updated, suggestionReason: reason, usedAI });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to suggest category", detail: String(err) });
-  }
-});

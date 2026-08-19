@@ -12,6 +12,7 @@ export type EventType =
   | "entry_deleted"
   | "export_requested"
   | "data_cleared"
+  | "account_deleted"
   | "theme_changed";
 
 interface OFAEvent {

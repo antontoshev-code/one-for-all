@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, inArray } from "drizzle-orm";
-import { db, peopleTable, entriesTable, entryPeopleTable } from "@workspace/db";
+import { eq, and, sql, inArray, db, peopleTable, entriesTable, entryPeopleTable } from "@workspace/db";
 import {
   CreatePersonBody,
   UpdatePersonBody,
@@ -12,10 +11,11 @@ import {
 const router: IRouter = Router();
 
 // GET /people — list all
-router.get("/people", async (_req, res): Promise<void> => {
+router.get("/people", async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(peopleTable)
+    .where(eq(peopleTable.userId, req.userId))
     .orderBy(sql`${peopleTable.name} asc`);
   res.json(rows);
 });
@@ -31,6 +31,7 @@ router.post("/people", async (req, res): Promise<void> => {
   const [person] = await db
     .insert(peopleTable)
     .values({
+      userId: req.userId,
       name: parsed.data.name,
       notes: parsed.data.notes ?? null,
       descriptor: parsed.data.descriptor ?? null,
@@ -56,7 +57,7 @@ router.get("/people/:id", async (req, res): Promise<void> => {
   const [person] = await db
     .select()
     .from(peopleTable)
-    .where(eq(peopleTable.id, params.data.id));
+    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId)));
 
   if (!person) {
     res.status(404).json({ error: "Person not found" });
@@ -73,7 +74,10 @@ router.get("/people/:id", async (req, res): Promise<void> => {
     entries = await db
       .select()
       .from(entriesTable)
-      .where(inArray(entriesTable.id, links.map((l) => l.entryId)))
+      .where(and(
+        inArray(entriesTable.id, links.map((l) => l.entryId)),
+        eq(entriesTable.userId, req.userId),
+      ))
       .orderBy(sql`${entriesTable.createdAt} desc`);
   }
 
@@ -124,7 +128,7 @@ router.patch("/people/:id", async (req, res): Promise<void> => {
   const [person] = await db
     .update(peopleTable)
     .set(updates)
-    .where(eq(peopleTable.id, params.data.id))
+    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId)))
     .returning();
 
   if (!person) {
@@ -143,7 +147,9 @@ router.delete("/people/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  await db.delete(peopleTable).where(eq(peopleTable.id, params.data.id));
+  await db
+    .delete(peopleTable)
+    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId)));
   res.sendStatus(204);
 });
 

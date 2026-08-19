@@ -1,5 +1,6 @@
 import { pgTable, serial, text, integer, timestamp } from "drizzle-orm/pg-core";
 import { captureTypeEnum, entriesTable } from "./entries";
+import { userTable } from "./auth";
 
 /**
  * Every original voice/text capture is recorded here so the user can
@@ -10,6 +11,13 @@ export const capturesTable = pgTable("captures", {
   id: serial("id").primaryKey(),
   content: text("content").notNull(),
   captureType: captureTypeEnum("capture_type").notNull(),
+
+  /**
+   * Owner. Nullable only so existing rows survive the migration — every row
+   * written after auth landed has one. The first account created claims the
+   * orphans (see claimOrphanedRows), after which nothing should be NULL.
+   */
+  userId: text("user_id").references(() => userTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
