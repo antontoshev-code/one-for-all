@@ -1,6 +1,6 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, type FC, type PropsWithChildren, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ThemeProvider } from 'next-themes';
+import { ThemeProvider as NextThemeProvider } from 'next-themes';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -24,6 +24,23 @@ import { AppNav } from '@/components/app-nav';
 import Login from '@/pages/login';
 import { getSession, type AuthUser } from '@/lib/auth-client';
 import { Loader2 } from 'lucide-react';
+
+/**
+ * next-themes types its provider without `children`, and whether that is an
+ * error depends on which @types/react instance pnpm resolves for it — which in
+ * turn depends on the rest of the workspace. It typechecked here and failed on
+ * Replit from the same lockfile. Naming the prop ourselves makes the component
+ * mean the same thing everywhere instead of inheriting whatever resolution the
+ * install happens to produce.
+ */
+const ThemeProvider = NextThemeProvider as FC<
+  PropsWithChildren<{
+    attribute?: string;
+    defaultTheme?: string;
+    enableSystem?: boolean;
+    disableTransitionOnChange?: boolean;
+  }>
+>;
 
 const queryClient = new QueryClient();
 
