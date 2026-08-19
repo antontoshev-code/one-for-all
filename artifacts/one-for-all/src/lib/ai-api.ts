@@ -89,8 +89,8 @@ export async function categorizeTexts(texts: string[]): Promise<CategorizeResult
 // ── Name detection ─────────────────────────────────────────────────────────
 
 export interface NamesResult {
-  /** null means no plausible person name found in that snippet */
-  names: (string | null)[];
+  /** One array per snippet — every person named in it, empty when none. */
+  names: string[][];
   source: "claude" | "unavailable" | "error";
 }
 
@@ -110,11 +110,12 @@ export async function detectPersonNames(texts: string[]): Promise<NamesResult> {
     const data = await res.json();
     const raw: unknown[] = Array.isArray(data.names) ? data.names : [];
     const names = texts.map((_, i) => {
-      const n = raw[i];
-      return typeof n === "string" && n.length > 0 ? n : null;
+      const entry = raw[i];
+      const list = Array.isArray(entry) ? entry : typeof entry === "string" ? [entry] : [];
+      return list.filter((n): n is string => typeof n === "string" && n.length > 0);
     });
     return { names, source: data.source ?? "error" };
   } catch {
-    return { names: texts.map(() => null), source: "error" };
+    return { names: texts.map(() => []), source: "error" };
   }
 }

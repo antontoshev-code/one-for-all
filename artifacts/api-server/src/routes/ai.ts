@@ -287,7 +287,7 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
 
 // ── POST /ai/detect-names ─────────────────────────────────────────────────
 // Body: { texts: string[] }
-// Returns { names: (string | null)[], source: 'claude' | 'unavailable' | 'error' }.
+// Returns { names: string[][], source: 'claude' | 'unavailable' | 'error' }.
 
 router.post("/ai/detect-names", aiQuota, async (req, res) => {
   const { texts } = req.body as { texts: string[] };
@@ -306,7 +306,7 @@ router.post("/ai/detect-names", aiQuota, async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
-    return res.json({ names: Array(texts.length).fill(null), source: "unavailable" });
+    return res.json({ names: texts.map(() => []), source: "unavailable" });
   }
 
   try {
@@ -326,12 +326,13 @@ router.post("/ai/detect-names", aiQuota, async (req, res) => {
               names: {
                 type: "array",
                 items: {
-                  type: "string",
+                  type: "array",
+                  items: { type: "string" },
                   description:
-                    "The first plausible person name if clearly present, or empty string if none",
+                    "Every person named in this snippet, in the order they appear. Empty array if none.",
                 },
                 description:
-                  "One entry per input text, same order. Use empty string when no person name is found.",
+                  "One array per input text, same order. Use an empty array when no person is named.",
               },
             },
             required: ["names"],
@@ -339,11 +340,14 @@ router.post("/ai/detect-names", aiQuota, async (req, res) => {
         },
       ],
       tool_choice: { type: "tool", name: "extract_names" },
-      system: `Extract the first plausible human person name from each diary/journal snippet.
+      system: `Extract EVERY human person named in each diary/journal snippet.
 Rules:
-- Only return a name if it clearly refers to a real person being mentioned personally (e.g. "Called Sarah" → "Sarah", "Lunch with Dr. Chen" → "Dr. Chen", "Met James at the gym" → "James")
-- Return empty string for: verbs, common nouns, place names, brands, pronouns, months, weekdays, sentence-opening words that happen to be capitalized, or anything ambiguous
-- Be conservative — an empty string is always better than a false positive`,
+- Return all of them, not just the first. "Met Petya, then Kalia and Elena came" → ["Petya", "Kalia", "Elena"]. Missing a person means the user has to add them by hand.
+- Only include a name that clearly refers to a real person being mentioned personally (e.g. "Called Sarah" → "Sarah", "Lunch with Dr. Chen" → "Dr. Chen")
+- Entries are written in English, Bulgarian, or both in the same sentence. Bulgarian names are just as valid — Петя, Калия, Елена are people. Return each name exactly as it is written in the text; do not transliterate between alphabets.
+- Exclude: verbs, common nouns, place names ("Столична община" is a place, not a person), organisations, brands and product names (Trello, Brighteye), pronouns, months, weekdays, and words capitalised only because they start a sentence.
+- Do not repeat the same person twice within one snippet.
+- Be conservative about what counts as a person, but exhaustive once it does — an empty array is better than a false positive, yet a real second name must never be dropped.`,
       messages: [
         {
           role: "user",
@@ -357,16 +361,26 @@ Rules:
       throw new Error("No tool_use block in Claude response");
     }
 
-    const raw = (toolUse.input as { names?: string[] }).names ?? [];
+    const raw = (toolUse.input as { names?: unknown }).names;
+    const rawList = Array.isArray(raw) ? raw : [];
+
+    // Tolerate the older single-string shape as well as the array one: the
+    // model occasionally answers with a bare string, and one malformed row
+    // should cost that row's names, not the whole capture's.
     const names = texts.map((_, i) => {
-      const n = raw[i];
-      return typeof n === "string" && n.trim().length > 0 ? n.trim() : null;
+      const entry = rawList[i];
+      const list = Array.isArray(entry) ? entry : typeof entry === "string" ? [entry] : [];
+      const cleaned = list
+        .filter((n): n is string => typeof n === "string")
+        .map(n => n.trim())
+        .filter(n => n.length > 0);
+      return [...new Map(cleaned.map(n => [n.toLowerCase(), n])).values()];
     });
 
     return res.json({ names, source: "claude" });
   } catch (err) {
     logger.error({ err }, "Claude name detection failed");
-    return res.json({ names: Array(texts.length).fill(null), source: "error" });
+    return res.json({ names: texts.map(() => []), source: "error" });
   }
 });
 

@@ -83,7 +83,32 @@ export function splitIntoChunks(text: string): string[] {
  * but are NEVER personal names. Prefer false-negatives (missing a real name)
  * over false-positives (flagging a common word as a person).
  */
+/**
+ * Words that look like names but aren't.
+ *
+ * Both languages the app is used in are listed, because the detector works on
+ * "capitalised word" and every sentence starts with one. The Bulgarian half
+ * matters more than it looks: Cyrillic detection only started working with this
+ * change, so without these every capture would offer "Вчера" or "Днес" as a
+ * person. Add to the right section when a false positive shows up rather than
+ * loosening the detector.
+ */
 const NON_NAME_WORDS = new Set([
+  // ── Bulgarian ──────────────────────────────────────────────────────────
+  // Time words, which open sentences constantly in a diary
+  'Вчера', 'Днес', 'Утре', 'Сега', 'Тогава', 'Снощи', 'Сутринта',
+  'Вечерта', 'Довечера', 'Понеделник', 'Вторник', 'Сряда', 'Четвъртък',
+  'Петък', 'Събота', 'Неделя', 'Януари', 'Февруари', 'Март', 'Април',
+  'Май', 'Юни', 'Юли', 'Август', 'Септември', 'Октомври', 'Ноември', 'Декември',
+  // Common sentence openers and connectives
+  'Аз', 'Ние', 'Той', 'Тя', 'Те', 'Това', 'Този', 'Тази', 'Тези', 'Онова',
+  'Има', 'Няма', 'Беше', 'Бях', 'Бяхме', 'Съм', 'Ще', 'Мога', 'Трябва',
+  'Много', 'Малко', 'Добре', 'Защото', 'Обаче', 'Също', 'Освен',
+  'После', 'Първо', 'Второ', 'Накрая', 'Изобщо', 'Естествено', 'Между',
+  'Съответно', 'Въобще', 'Доста', 'Как', 'Кога', 'Какво', 'Къде', 'Защо',
+  'Направихме', 'Работихме', 'Говорихме', 'Обсъдихме', 'Показах',
+
+  // ── English ────────────────────────────────────────────────────────────
   // Pronouns
   'I', 'A', 'An', 'The', 'This', 'That', 'These', 'Those',
   'It', 'He', 'She', 'We', 'They', 'You',
@@ -159,41 +184,63 @@ export interface NameDetectionResult {
 }
 
 /**
- * Detect personal names in a chunk of text.
- * Returns matchedPeople (> 1 match), matchedPerson (1 match), suggestedName (0 matches),
- * or {} if no candidate found. Strongly prefers under-flagging over false positives.
+ * Find every person name in a chunk, one result per distinct name.
+ *
+ * Two things were wrong before. It returned after the first candidate, so a
+ * capture naming three people offered one — and the pattern was `[A-Z][a-z]{2,}`,
+ * which is ASCII-only and cannot match a single Cyrillic letter. For a diary
+ * written mostly in Bulgarian that meant this never fired at all.
+ *
+ * Unicode property escapes fix both scripts at once: \p{Lu} is any uppercase
+ * letter in any alphabet, so Петя and Sarah are found by the same rule.
+ *
+ * Still biased toward missing names rather than inventing them. A missed name
+ * costs one tap to add; a false one puts a stranger in someone's diary.
  */
 export function detectNamesInChunk(
   chunk: string,
   existingPeople: { id: number; name: string; descriptor?: string | null }[]
-): NameDetectionResult {
-  // Find capitalised words (Title Case, 3+ chars) that are not in the stoplist
-  const capitalizedWords = (chunk.match(/\b[A-Z][a-z]{2,}\b/g) || [])
-    .filter(w => !NON_NAME_WORDS.has(w));
+): NameDetectionResult[] {
+  const results: NameDetectionResult[] = [];
+  const seen = new Set<string>();
 
-  if (capitalizedWords.length === 0) return {};
+  for (const match of chunk.matchAll(/\p{Lu}\p{Ll}{2,}/gu)) {
+    const candidate = match[0];
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
 
-  // Check for person matches (single or multiple with same name)
-  for (const candidate of capitalizedWords) {
     const matches = existingPeople.filter(p => {
       const firstName = p.name.split(' ')[0].toLowerCase();
-      return (
-        p.name.toLowerCase() === candidate.toLowerCase() ||
-        firstName === candidate.toLowerCase()
-      );
+      return p.name.toLowerCase() === key || firstName === key;
     });
-    if (matches.length > 1) return { matchedPeople: matches };
-    if (matches.length === 1) return { matchedPerson: matches[0] };
-  }
 
-  // Suggest the first plausible candidate: must be ≥4 chars and not caught by stoplist.
-  // Iterating (not just checking [0]) lets us skip short 3-char words like "Met"
-  // and still find the real name that follows.
-  for (const candidate of capitalizedWords) {
-    if (candidate.length >= 4) {
-      return { suggestedName: candidate };
+    if (matches.length > 0) {
+      seen.add(key);
+      results.push(matches.length > 1 ? { matchedPeople: matches } : { matchedPerson: matches[0] });
+      continue;
     }
+
+    // Nobody by this name is known, so the only evidence is the capital letter
+    // — and every sentence starts with one. "Coffee with Petya" would otherwise
+    // propose Coffee as a person, and no stoplist ever finishes that fight in
+    // two languages. A known name is still recognised at the start of a
+    // sentence, because the match itself is the evidence there.
+    if (isSentenceInitial(chunk, match.index ?? 0)) continue;
+    if (NON_NAME_WORDS.has(candidate)) continue;
+    if (candidate.length < 4) continue;
+
+    seen.add(key);
+    results.push({ suggestedName: candidate });
   }
 
-  return {};
+  return results;
+}
+
+/** True when nothing but whitespace and sentence-ending punctuation precedes the word. */
+const SENTENCE_ENDERS = new Set([".", "!", "?", "…"]);
+
+function isSentenceInitial(text: string, index: number): boolean {
+  const before = text.slice(0, index).trimEnd();
+  if (before.length === 0) return true;
+  return SENTENCE_ENDERS.has(before[before.length - 1]);
 }
