@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  db, inArray, eq,
+  db, inArray, eq, and, notDeleted,
   entriesTable, peopleTable, entryPeopleTable, capturesTable, captureEntriesTable,
   userTable,
 } from "@workspace/db";
@@ -18,7 +18,13 @@ const router = Router();
  * column of their own.
  */
 
-/** Ids of the caller's own entries and captures — the basis for junction filtering. */
+/**
+ * Ids of the caller's own entries and captures — the basis for junction filtering.
+ *
+ * Deliberately includes soft-deleted rows. This feeds "clear everything", and
+ * "everything" has to mean it: a row the user deleted last week is still theirs
+ * and still in the table, so leaving it behind would make the promise false.
+ */
 async function ownedIds(userId: string) {
   const [entries, captures] = await Promise.all([
     db.select({ id: entriesTable.id }).from(entriesTable).where(eq(entriesTable.userId, userId)),
@@ -36,8 +42,12 @@ router.get("/data/export", async (req, res) => {
     const { entryIds, captureIds } = await ownedIds(req.userId);
 
     const [entries, people, captures] = await Promise.all([
-      db.select().from(entriesTable).where(eq(entriesTable.userId, req.userId)),
-      db.select().from(peopleTable).where(eq(peopleTable.userId, req.userId)),
+      // Deleted rows are excluded: an export is a copy of what the user has,
+      // and handing back something they deleted would be a surprise at best.
+      db.select().from(entriesTable)
+        .where(and(eq(entriesTable.userId, req.userId), notDeleted(entriesTable))),
+      db.select().from(peopleTable)
+        .where(and(eq(peopleTable.userId, req.userId), notDeleted(peopleTable))),
       db.select().from(capturesTable).where(eq(capturesTable.userId, req.userId)),
     ]);
 

@@ -100,17 +100,46 @@ export default function CategoryList({ category, title, description }: CategoryL
     );
   };
 
+  const refreshLists = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category }) }),
+    queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() }),
+  ]);
+
+  /**
+   * Delete is now reversible — the row is kept and marked deleted, so Undo
+   * genuinely restores it rather than writing a new entry that merely looks
+   * the same. A confirmation dialog isn't a safety net; people confirm by
+   * reflex, and this is something they wrote about their own life.
+   */
   const handleDelete = async (id: number) => {
     setDeletingId(id);
     try {
       await deleteEntry.mutateAsync({ id });
       logEvent("entry_deleted", { entryId: id, category });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: getListEntriesQueryKey({ category }) }),
-        queryClient.invalidateQueries({ queryKey: getGetEntryStatsQueryKey() }),
-      ]);
+      await refreshLists();
       if (expandedId === id) setExpandedId(null);
       if (editingId === id) setEditingId(null);
+
+      toast({
+        title: "Deleted",
+        action: (
+          <ToastAction
+            altText="Undo"
+            onClick={async () => {
+              try {
+                const res = await fetch(`/api/entries/${id}/restore`, { method: "POST" });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                await refreshLists();
+              } catch (err) {
+                console.error("Restore failed", err);
+                toast({ title: "Could not undo", description: "Please try again." });
+              }
+            }}
+          >
+            Undo
+          </ToastAction>
+        ),
+      });
     } catch (err) {
       console.error("Delete failed", err);
     } finally {

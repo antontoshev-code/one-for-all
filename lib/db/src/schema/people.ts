@@ -31,6 +31,19 @@ export const peopleTable = pgTable("people", {
    * orphans (see claimOrphanedRows), after which nothing should be NULL.
    */
   userId: text("user_id").references(() => userTable.id, { onDelete: "cascade" }),
+
+  /**
+   * Set when the row is deleted, rather than removing it.
+   *
+   * A confirmation dialog is not a safety net — people confirm by reflex, and
+   * the thing being deleted here is something they wrote about their own life.
+   * Keeping the row lets Undo actually restore it instead of pretending to.
+   *
+   * Every read must exclude these. Use `notDeleted()` from @workspace/db rather
+   * than writing the check by hand, so a missed one is a compile-time absence
+   * rather than deleted entries quietly reappearing in a list.
+   */
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

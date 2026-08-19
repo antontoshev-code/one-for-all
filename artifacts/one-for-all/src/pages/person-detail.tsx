@@ -2,11 +2,13 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, Link, useLocation } from "wouter";
 import {
   useGetPerson, useUpdatePerson, useDeletePerson,
-  getGetPersonQueryKey, useUnlinkPersonFromEntry,
+  getGetPersonQueryKey, useUnlinkPersonFromEntry, useLinkPersonToEntry,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, ArrowLeft, Trash2, Unlink, AlertCircle, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -183,6 +185,8 @@ export default function PersonDetail() {
   const updatePerson = useUpdatePerson();
   const deletePerson = useDeletePerson();
   const unlinkPerson = useUnlinkPersonFromEntry();
+  const linkPerson = useLinkPersonToEntry();
+  const { toast } = useToast();
 
   const [notes, setNotes] = useState("");
   const initRef = useRef<number | null>(null);
@@ -293,10 +297,38 @@ export default function PersonDetail() {
 
   const handleDelete = () => {
     if (!person) return;
-    deletePerson.mutate({ id: person.id }, {
+    const deletedId = person.id;
+    const deletedName = person.name;
+
+    deletePerson.mutate({ id: deletedId }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ["/api/people"] });
         setLocation("/people");
+
+        // The profile is gone from view by now, so the toast is the only way
+        // back. It restores the person and their links intact — the row was
+        // marked deleted, not removed.
+        toast({
+          title: `${deletedName} deleted`,
+          action: (
+            <ToastAction
+              altText="Undo"
+              onClick={async () => {
+                try {
+                  const res = await fetch(`/api/people/${deletedId}/restore`, { method: "POST" });
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                  queryClient.invalidateQueries({ queryKey: ["/api/people"] });
+                  setLocation(`/people/${deletedId}`);
+                } catch (err) {
+                  console.error("Restore failed", err);
+                  toast({ title: "Could not undo", description: "Please try again." });
+                }
+              }}
+            >
+              Undo
+            </ToastAction>
+          ),
+        });
       },
     });
   };
@@ -306,6 +338,28 @@ export default function PersonDetail() {
     try {
       await unlinkPerson.mutateAsync({ id: entryId, personId });
       queryClient.invalidateQueries({ queryKey: getGetPersonQueryKey(personId) });
+
+      // Re-linking is the exact inverse, so this Undo is honest — nothing was
+      // destroyed, only the connection between two things that both still exist.
+      toast({
+        title: "Link removed",
+        action: (
+          <ToastAction
+            altText="Undo"
+            onClick={async () => {
+              try {
+                await linkPerson.mutateAsync({ id: entryId, data: { personId } });
+                queryClient.invalidateQueries({ queryKey: getGetPersonQueryKey(personId) });
+              } catch (err) {
+                console.error("Re-link failed", err);
+                toast({ title: "Could not undo", description: "Please try again." });
+              }
+            }}
+          >
+            Undo
+          </ToastAction>
+        ),
+      });
     } catch (err) {
       console.error("Unlink failed", err);
     } finally {

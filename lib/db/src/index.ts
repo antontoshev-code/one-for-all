@@ -1,4 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
+import { isNull } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import pg from "pg";
 import * as schema from "./schema";
 
@@ -38,3 +40,14 @@ export {
   asc, desc,
   sql,
 } from "drizzle-orm";
+
+/**
+ * The "not deleted" predicate, in one place.
+ *
+ * Soft deletion only works if every read remembers to exclude deleted rows.
+ * Spelling `isNull(x.deletedAt)` at each call site is how one gets forgotten,
+ * and a forgotten one puts a deleted diary entry back in front of someone.
+ */
+export function notDeleted(table: { deletedAt: PgColumn }) {
+  return isNull(table.deletedAt);
+}

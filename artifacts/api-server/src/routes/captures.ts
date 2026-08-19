@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, and, sql, db, capturesTable, captureEntriesTable, entriesTable, entryPeopleTable, peopleTable } from "@workspace/db";
+import { eq, and, sql, db, notDeleted, capturesTable, captureEntriesTable, entriesTable, entryPeopleTable, peopleTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -35,13 +35,19 @@ router.get("/captures", async (req, res): Promise<void> => {
             const [entry] = await db
               .select()
               .from(entriesTable)
-              .where(and(eq(entriesTable.id, link.entryId), eq(entriesTable.userId, req.userId)));
+              // `exists` drives the History view's "this entry was deleted"
+              // state, so a soft-deleted entry must read as gone here too.
+              .where(and(
+                eq(entriesTable.id, link.entryId),
+                eq(entriesTable.userId, req.userId),
+                notDeleted(entriesTable),
+              ));
 
             const personRows = await db
               .select({ id: peopleTable.id, name: peopleTable.name })
               .from(entryPeopleTable)
               .innerJoin(peopleTable, eq(entryPeopleTable.personId, peopleTable.id))
-              .where(eq(entryPeopleTable.entryId, link.entryId));
+              .where(and(eq(entryPeopleTable.entryId, link.entryId), notDeleted(peopleTable)));
 
             return {
               entryId: link.entryId,

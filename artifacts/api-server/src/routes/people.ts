@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, sql, inArray, db, peopleTable, entriesTable, entryPeopleTable } from "@workspace/db";
+import { eq, and, sql, inArray, db, notDeleted, peopleTable, entriesTable, entryPeopleTable } from "@workspace/db";
 import {
   CreatePersonBody,
   UpdatePersonBody,
@@ -15,7 +15,7 @@ router.get("/people", async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(peopleTable)
-    .where(eq(peopleTable.userId, req.userId))
+    .where(and(eq(peopleTable.userId, req.userId), notDeleted(peopleTable)))
     .orderBy(sql`${peopleTable.name} asc`);
   res.json(rows);
 });
@@ -57,7 +57,7 @@ router.get("/people/:id", async (req, res): Promise<void> => {
   const [person] = await db
     .select()
     .from(peopleTable)
-    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId)));
+    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId), notDeleted(peopleTable)));
 
   if (!person) {
     res.status(404).json({ error: "Person not found" });
@@ -77,6 +77,8 @@ router.get("/people/:id", async (req, res): Promise<void> => {
       .where(and(
         inArray(entriesTable.id, links.map((l) => l.entryId)),
         eq(entriesTable.userId, req.userId),
+        // A deleted entry must not reappear on a person's profile.
+        notDeleted(entriesTable),
       ))
       .orderBy(sql`${entriesTable.createdAt} desc`);
   }
@@ -128,7 +130,7 @@ router.patch("/people/:id", async (req, res): Promise<void> => {
   const [person] = await db
     .update(peopleTable)
     .set(updates)
-    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId)))
+    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId), notDeleted(peopleTable)))
     .returning();
 
   if (!person) {
@@ -147,10 +149,36 @@ router.delete("/people/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  // Soft delete, so Undo can restore them along with their links. The entries
+  // that mention them are untouched either way — those are the user's words.
   await db
-    .delete(peopleTable)
-    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId)));
+    .update(peopleTable)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId), notDeleted(peopleTable)));
   res.sendStatus(204);
+});
+
+// POST /people/:id/restore — undo a delete
+router.post("/people/:id/restore", async (req, res): Promise<void> => {
+  const params = DeletePersonParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  // Not filtered by notDeleted — a deleted row is what this is for. Still
+  // owner-scoped, so only your own deletion can be undone.
+  const [restored] = await db
+    .update(peopleTable)
+    .set({ deletedAt: null })
+    .where(and(eq(peopleTable.id, params.data.id), eq(peopleTable.userId, req.userId)))
+    .returning({ id: peopleTable.id });
+
+  if (!restored) {
+    res.status(404).json({ error: "Person not found" });
+    return;
+  }
+  res.json(restored);
 });
 
 export default router;

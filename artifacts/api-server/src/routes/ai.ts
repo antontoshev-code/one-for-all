@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
-import { db, eq, peopleTable } from "@workspace/db";
+import { db, eq, and, notDeleted, peopleTable } from "@workspace/db";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -93,7 +93,8 @@ async function vocabularyHint(userId: string): Promise<string | undefined> {
     const people = await db
       .select({ name: peopleTable.name, aliases: peopleTable.aliases })
       .from(peopleTable)
-      .where(eq(peopleTable.userId, userId));
+      // Someone you deleted should not be whispered back into transcriptions.
+      .where(and(eq(peopleTable.userId, userId), notDeleted(peopleTable)));
 
     const words = [...new Set(people.flatMap(p => [p.name, ...(p.aliases ?? [])]))]
       .map(w => w.trim())

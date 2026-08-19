@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, inArray, and, or, isNull, db, entriesTable, peopleTable, entryPeopleTable } from "@workspace/db";
+import { eq, sql, inArray, and, or, isNull, notDeleted, db, entriesTable, peopleTable, entryPeopleTable } from "@workspace/db";
 import {
   CreateEntryBody,
   UpdateEntryBody,
@@ -35,7 +35,7 @@ async function getEntryWithPeople(id: number, userId: string) {
   const [entry] = await db
     .select()
     .from(entriesTable)
-    .where(and(eq(entriesTable.id, id), eq(entriesTable.userId, userId)));
+    .where(and(eq(entriesTable.id, id), eq(entriesTable.userId, userId), notDeleted(entriesTable)));
   if (!entry) return null;
 
   const links = await db
@@ -51,6 +51,9 @@ async function getEntryWithPeople(id: number, userId: string) {
       .where(and(
         inArray(peopleTable.id, links.map((l) => l.personId)),
         eq(peopleTable.userId, userId),
+        // The junction row survives a person's deletion, so without this a
+        // deleted person keeps appearing attached to every entry they touched.
+        notDeleted(peopleTable),
       ));
   }
 
@@ -72,13 +75,13 @@ router.get("/entries", async (req, res): Promise<void> => {
           .from(entriesTable)
           .where(and(
             eq(entriesTable.category, parsed.data.category),
-            eq(entriesTable.userId, req.userId),
+            eq(entriesTable.userId, req.userId), notDeleted(entriesTable),
           ))
           .orderBy(sql`${entriesTable.createdAt} desc`)
       : await db
           .select()
           .from(entriesTable)
-          .where(eq(entriesTable.userId, req.userId))
+          .where(and(eq(entriesTable.userId, req.userId), notDeleted(entriesTable)))
           .orderBy(sql`${entriesTable.createdAt} desc`);
 
     res.json(rows);
@@ -127,7 +130,7 @@ router.get("/entries/stats", async (req, res): Promise<void> => {
     const rows = await db
       .select({ category: entriesTable.category, count: sql<number>`count(*)::int` })
       .from(entriesTable)
-      .where(eq(entriesTable.userId, req.userId))
+      .where(and(eq(entriesTable.userId, req.userId), notDeleted(entriesTable)))
       .groupBy(entriesTable.category);
 
     const counts: Record<string, number> = { inbox: 0, journal: 0, task: 0, idea: 0, log: 0 };
@@ -140,7 +143,7 @@ router.get("/entries/stats", async (req, res): Promise<void> => {
       .select({ count: sql<number>`count(*)::int` })
       .from(entriesTable)
       .where(and(
-        eq(entriesTable.userId, req.userId),
+        eq(entriesTable.userId, req.userId), notDeleted(entriesTable),
         eq(entriesTable.category, "task"),
         or(eq(entriesTable.isTaskDone, false), isNull(entriesTable.isTaskDone)),
       ));
@@ -199,7 +202,7 @@ router.patch("/entries/:id", async (req, res): Promise<void> => {
     const [entry] = await db
       .update(entriesTable)
       .set(updates)
-      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId)))
+      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId), notDeleted(entriesTable)))
       .returning();
 
     if (!entry) {
@@ -221,12 +224,44 @@ router.delete("/entries/:id", async (req, res): Promise<void> => {
   }
 
   try {
+    // Soft delete. The row stays so Undo can bring it back — a confirmation
+    // dialog is not a safety net when people confirm by reflex, and what is
+    // being deleted is something they wrote about their own life.
     await db
-      .delete(entriesTable)
-      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId)));
+      .update(entriesTable)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId), notDeleted(entriesTable)));
     res.sendStatus(204);
   } catch (err) {
     res.status(500).json({ error: "Failed to delete entry", detail: String(err) });
+  }
+});
+
+// POST /entries/:id/restore — undo a delete
+router.post("/entries/:id/restore", async (req, res): Promise<void> => {
+  const params = DeleteEntryParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  try {
+    // Deliberately not filtered by notDeleted: a deleted row is exactly what
+    // this is looking for. Still owner-scoped, so it can only ever restore
+    // something the caller deleted themselves.
+    const [restored] = await db
+      .update(entriesTable)
+      .set({ deletedAt: null })
+      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId)))
+      .returning({ id: entriesTable.id });
+
+    if (!restored) {
+      res.status(404).json({ error: "Entry not found" });
+      return;
+    }
+    res.json(restored);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to restore entry", detail: String(err) });
   }
 });
 
@@ -248,11 +283,15 @@ router.post("/entries/:id/people", async (req, res): Promise<void> => {
     const [ownedEntry] = await db
       .select({ id: entriesTable.id })
       .from(entriesTable)
-      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId)));
+      .where(and(eq(entriesTable.id, params.data.id), eq(entriesTable.userId, req.userId), notDeleted(entriesTable)));
     const [ownedPerson] = await db
       .select({ id: peopleTable.id })
       .from(peopleTable)
-      .where(and(eq(peopleTable.id, parsed.data.personId), eq(peopleTable.userId, req.userId)));
+      .where(and(
+        eq(peopleTable.id, parsed.data.personId),
+        eq(peopleTable.userId, req.userId),
+        notDeleted(peopleTable),
+      ));
 
     if (!ownedEntry || !ownedPerson) {
       res.status(404).json({ error: "Entry or person not found" });
