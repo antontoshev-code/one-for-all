@@ -237,6 +237,51 @@ router.delete("/entries/:id", async (req, res): Promise<void> => {
   }
 });
 
+/**
+ * PATCH /entries/:id/due — set or clear a task's due time.
+ *
+ * A route of its own rather than a field on the entry update, because the entry
+ * schemas are generated from the OpenAPI spec and regenerating that client has
+ * broken this build before. This is the smaller, reversible change.
+ */
+router.patch("/entries/:id/due", async (req, res): Promise<void> => {
+  const params = UpdateEntryParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const { dueAt } = req.body as { dueAt?: string | null };
+
+  // null clears it; anything else has to be a real timestamp. A string that
+  // does not parse would become an Invalid Date and then a null column, which
+  // looks like a successful clear rather than the rejected input it is.
+  if (dueAt !== null && (typeof dueAt !== "string" || Number.isNaN(Date.parse(dueAt)))) {
+    res.status(400).json({ error: "dueAt must be an ISO timestamp or null" });
+    return;
+  }
+
+  try {
+    const [updated] = await db
+      .update(entriesTable)
+      .set({ dueAt: dueAt === null ? null : new Date(dueAt) })
+      .where(and(
+        eq(entriesTable.id, params.data.id),
+        eq(entriesTable.userId, req.userId),
+        notDeleted(entriesTable),
+      ))
+      .returning({ id: entriesTable.id, dueAt: entriesTable.dueAt });
+
+    if (!updated) {
+      res.status(404).json({ error: "Entry not found" });
+      return;
+    }
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to set the due time", detail: String(err) });
+  }
+});
+
 // POST /entries/:id/restore — undo a delete
 router.post("/entries/:id/restore", async (req, res): Promise<void> => {
   const params = DeleteEntryParams.safeParse(req.params);

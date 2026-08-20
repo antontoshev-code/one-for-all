@@ -67,6 +67,8 @@ interface SplitPiece {
   category: Category;
   accepted: boolean;
   names: PieceName[];
+  /** When a task said when it happens. Null for the vast majority. */
+  dueAt: string | null;
 }
 
 /** Wrap raw detections as undecided names. */
@@ -370,6 +372,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         category: unit.category,
         accepted: true,
         names: asPieceNames(detectNamesInChunk(unit.text, people || [])),
+        // No model, so nothing to read a date out of a sentence with.
+        dueAt: null,
       }));
     };
 
@@ -377,12 +381,19 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
       const res = await fetch('/api/ai/split', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: entry.content }),
+        // Without the client's clock "tonight at 21:20" cannot be resolved.
+        // The server's own clock is no help: it runs in North America and the
+        // user is in Bulgaria.
+        body: JSON.stringify({
+          text: entry.content,
+          now: new Date().toISOString(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json() as {
-        units: Array<{ text: string; category: string; people: string[] }>;
+        units: Array<{ text: string; category: string; people: string[]; dueAt?: string | null }>;
         source: 'claude' | 'heuristic';
       };
 
@@ -401,6 +412,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
           category: unit.category as Category,
           accepted: true,
           names: asPieceNames(detections),
+          dueAt: unit.dueAt ?? null,
         };
       });
 
@@ -472,6 +484,21 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         });
 
         createdEntries.push({ entryId: newEntry.id, category: piece.category });
+
+        // Separate call because the entry schemas are generated from the
+        // OpenAPI spec, and regenerating that client has broken this build
+        // before. Failure costs the reminder, never the entry.
+        if (piece.dueAt) {
+          try {
+            await fetch(`/api/entries/${newEntry.id}/due`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ dueAt: piece.dueAt }),
+            });
+          } catch (err) {
+            console.warn("Failed to save the due time", err);
+          }
+        }
 
         // Link everyone this piece resolved to.
         for (const personId of [...new Set(personIds)]) {

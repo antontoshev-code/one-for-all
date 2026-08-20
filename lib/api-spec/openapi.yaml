@@ -297,6 +297,51 @@ paths:
         "204":
           description: Deleted
 
+  /entries/{id}/due:
+    patch:
+      operationId: setEntryDue
+      tags: [entries]
+      summary: Set or clear a task's due time
+      description: >
+        Only meaningful for tasks. Null clears it. Stored as a timestamp rather
+        than the phrase that produced it, because "tonight at 21:20" stops
+        meaning tonight tomorrow morning.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dueAt]
+              properties:
+                dueAt:
+                  type: ["string", "null"]
+                  format: date-time
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  dueAt:
+                    type: ["string", "null"]
+                    format: date-time
+        "400":
+          description: dueAt was neither a timestamp nor null
+        "404":
+          description: No such entry belongs to the caller
+
+
   # ── Restore ────────────────────────────────────────────────────────────────
   # Deleting marks a row rather than removing it, so Undo can return the same
   # entry with its people links intact instead of a copy that merely resembles it.

@@ -33,6 +33,19 @@ export const entriesTable = pgTable("entries", {
    * rather than deleted entries quietly reappearing in a list.
    */
   deletedAt: timestamp("deleted_at"),
+  /**
+   * When a task is due, where the capture said so.
+   *
+   * Only meaningful for tasks. Nullable because most have no date — "buy milk"
+   * is a task without being an appointment — and a made-up deadline is worse
+   * than none.
+   *
+   * Stored as a timestamp rather than the phrase that produced it: "tonight at
+   * 21:20" stops meaning tonight tomorrow morning, and a reminder that fires on
+   * the wrong day is worse than no reminder.
+   */
+  dueAt: timestamp("due_at"),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

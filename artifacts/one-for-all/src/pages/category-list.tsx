@@ -4,8 +4,9 @@ import {
   getListEntriesQueryKey, getGetEntryStatsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Trash2, AlertCircle, Pencil, Check, X } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { Loader2, Trash2, AlertCircle, Pencil, Check, X, CalendarPlus, Clock } from "lucide-react";
+import { formatDate, formatDueDate } from "@/lib/utils";
+import { downloadIcs } from "@/lib/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -242,6 +243,9 @@ export default function CategoryList({ category, title, description }: CategoryL
             const isExpanded = expandedId === entry.id;
             const isEditing = editingId === entry.id;
             const isDone = entry.isTaskDone;
+            const rawDue = (entry as { dueAt?: string | null }).dueAt;
+            const dueAt = rawDue ? new Date(rawDue) : null;
+            const isOverdue = Boolean(dueAt && !isDone && dueAt.getTime() < Date.now());
             const isDeleting = deletingId === entry.id;
 
             return (
@@ -283,6 +287,39 @@ export default function CategoryList({ category, title, description }: CategoryL
                       <p className={`text-foreground leading-relaxed transition-all ${!isExpanded ? "line-clamp-2" : ""} ${isDone ? "line-through text-muted-foreground" : ""}`}>
                         {entry.content}
                       </p>
+                    )}
+
+                    {/* When a task said when it happens, say so and offer to
+                        put it in the calendar the user actually gets reminded
+                        by. A notification from this app would only fire while
+                        the page is open — which at 21:20 it will not be. */}
+                    {dueAt && (
+                      <div className="flex items-center justify-between gap-2 mt-3">
+                        <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full ${
+                          isOverdue
+                            ? "bg-destructive/10 text-destructive"
+                            : "bg-secondary text-secondary-foreground"
+                        }`}>
+                          <Clock className="w-3 h-3" />
+                          {formatDueDate(dueAt)}
+                        </span>
+                        {!isDone && (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              downloadIcs({
+                                title: entry.content ?? "Task",
+                                start: dueAt,
+                                uid: `one-for-all-entry-${entry.id}`,
+                              });
+                            }}
+                            className="inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors shrink-0"
+                          >
+                            <CalendarPlus className="w-3.5 h-3.5" />
+                            Add to calendar
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">

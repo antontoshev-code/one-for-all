@@ -23,33 +23,56 @@ const VALID_CATEGORIES: Category[] = ["journal", "task", "idea", "log"];
 const CLAUDE_MODEL = "claude-haiku-4-5";
 
 // ── Heuristic fallback (mirrors frontend heuristics.ts) ───────────────────
+//
+// Kept deliberately in step with the frontend's version: this runs when Claude
+// is unavailable, and the two disagreeing about what a capture is would be
+// worse than either being wrong on its own. Both languages the app supports are
+// covered — an English-only keyword list filed every Bulgarian capture as a
+// journal entry.
 
-// Log = SPECIFICALLY body / health / physical tracking.
-// General daily-life activities default to journal.
+const TASK_WORDS = [
+  "need to", "remind", "todo", "must", "should", "don't forget",
+  "remember to", "have to", "call", "email", "schedule", "pick up", "buy", "check",
+  "трябва", "имам задача", "задача да", "не забравя", "напомни", "напомняне",
+  "ще трябва", "предстои", "остава да", "да звънна", "да се обадя", "да купя",
+  "да взема", "да напиша", "да изпратя", "да проверя", "да подготвя", "за утре",
+];
+
+const IDEA_WORDS = [
+  "idea", "what if", "concept", "maybe we could", "what about",
+  "thinking about building", "could be interesting", "perhaps",
+  "i want to", "i think i want",
+  "идея", "хрумна ми", "какво ако", "би било", "мисля да направя",
+  "искам да направя", "би било интересно", "какво ще стане ако",
+];
+
+const LOG_WORDS = [
+  "workout", "worked out", "exercise", "exercised", "training",
+  "ran ", "running", "jogged", "jogging", "sprinted", "cycling", "swam",
+  "lifted", "gym", "pull-up", "push-up", "bench press", "squat", "deadlift", "reps",
+  "slept", "sleep", "woke up", "fatigue", "felt great", "felt tired", "energy",
+  "ate ", "eating", "meal", "breakfast", "lunch", "dinner", "calories", "fasting",
+  "weight ", "weighed", "bmi", "heart rate", "pulse", "blood pressure", "steps taken",
+  "headache", "stomachache", "pain", "sore", "symptom", "sick", "fever", "nausea",
+  "medication", "vitamins", "supplements",
+  "тренирах", "тренировка", "тренирам", "фитнес", "бягах", "бягане", "плувах",
+  "лицеви", "коремни", "клекове", "набирания", "щанга", "серии", "повторения",
+  "кардио", "спах", "не спах", "събудих се", "умора", "изтощен", "енергия",
+  "закуска", "обяд", "вечеря", "хранене", "калории", "тегло", "главоболие",
+  "болка", "боли ме", "температура", "болен", "лекарство", "витамини", "пулс",
+];
+
 function heuristicCategory(text: string): Category {
   const t = text.toLowerCase();
-  if (
-    ["need to", "remind", "todo", "must", "should", "don't forget",
-      "remember to", "have to", "call", "email", "schedule", "meet",
-      "pick up", "buy", "check"].some(w => t.includes(w))
-  ) return "task";
-  if (
-    ["idea", "what if", "concept", "maybe we could", "what about",
-      "thinking about building", "could be interesting", "perhaps",
-      "i want to", "i think i want"].some(w => t.includes(w))
-  ) return "idea";
-  if (
-    ["workout", "worked out", "exercise", "exercised", "training",
-      "ran ", "running", "jogged", "jogging", "sprinted", "cycling", "swam",
-      "lifted", "gym", "pull-up", "push-up", "bench press", "squat", "deadlift", "reps",
-      "slept", "sleep", "woke up", "fatigue",
-      "ate ", "eating", "meal", "breakfast", "lunch", "dinner", "calories", "fasting",
-      "weight ", "weighed", "bmi",
-      "heart rate", "pulse", "blood pressure", "steps taken",
-      "headache", "stomachache", "pain", "sore", "symptom", "sick", "fever", "nausea",
-      "medication", "vitamins", "supplements",
-    ].some(w => t.includes(w))
-  ) return "log";
+  if (TASK_WORDS.some(w => t.includes(w))) return "task";
+  if (IDEA_WORDS.some(w => t.includes(w))) return "idea";
+
+  // Log needs the sentence to be ABOUT the body rather than to mention it in
+  // passing: "Слязох до София с колата и там тренирах" is narrative.
+  const hits = LOG_WORDS.filter(w => t.includes(w)).length;
+  const words = t.split(/\s+/).filter(Boolean).length;
+  if (hits >= 2 || (hits === 1 && words <= 6)) return "log";
+
   return "journal";
 }
 
@@ -67,9 +90,30 @@ const router = Router();
 
 // ── Heuristic sentence splitter (fallback when Claude is unavailable) ─────
 
-function heuristicSplit(text: string): string[] {
-  const raw = text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 3);
-  return raw.length > 1 ? raw : [text.trim()];
+/**
+ * Sentences grouped into units, splitting only where the category changes.
+ *
+ * Plain sentence splitting turned one evening's diary into eight pieces. A
+ * day's account is one entry however many things happened in it; the reason to
+ * separate a part is that it belongs somewhere else.
+ */
+function heuristicSplit(text: string): { text: string; category: Category }[] {
+  const sentences = text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 3);
+  if (sentences.length <= 1) {
+    return [{ text: text.trim(), category: heuristicCategory(text) }];
+  }
+
+  const units: { text: string; category: Category }[] = [];
+  for (const sentence of sentences) {
+    const category = heuristicCategory(sentence);
+    const last = units[units.length - 1];
+    if (last && last.category === category) {
+      last.text = `${last.text} ${sentence}`.trim();
+    } else {
+      units.push({ text: sentence, category });
+    }
+  }
+  return units;
 }
 
 // ── POST /ai/transcribe ───────────────────────────────────────────────────
@@ -457,7 +501,18 @@ Rules:
 // Falls back to punctuation splitting + heuristic categorization if Claude is unavailable.
 
 router.post("/ai/split", aiQuota, async (req, res) => {
-  const { text } = req.body as { text?: string };
+  const { text, now, timeZone } = req.body as {
+    text?: string;
+    /** The client's clock. "tonight at 21:20" is meaningless without it. */
+    now?: string;
+    timeZone?: string;
+  };
+
+  // Trusted only as far as being a real timestamp: it decides what "tonight"
+  // means, so a malformed value falls back to no context rather than reaching
+  // the model as nonsense.
+  const nowIso = now && !Number.isNaN(Date.parse(now)) ? new Date(now).toISOString() : null;
+  const zone = typeof timeZone === "string" && /^[\w+\-/]{1,64}$/.test(timeZone) ? timeZone : null;
 
   if (!text?.trim()) {
     return res.status(400).json({ error: "text is required" });
@@ -473,10 +528,12 @@ router.post("/ai/split", aiQuota, async (req, res) => {
   const clean = text.trim();
 
   const fallback = () =>
-    heuristicSplit(clean).map(chunk => ({
-      text: chunk,
-      category: heuristicCategory(chunk),
+    heuristicSplit(clean).map(unit => ({
+      text: unit.text,
+      category: unit.category,
       people: [] as string[],
+      // Without a model there is nothing to read a date out of a sentence with.
+      dueAt: null as string | null,
     }));
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -517,6 +574,11 @@ router.post("/ai/split", aiQuota, async (req, res) => {
                       description:
                         "Person names genuinely mentioned in this unit, exactly as they appear in the text.",
                     },
+                    dueAt: {
+                      type: ["string", "null"],
+                      description:
+                        "For a task with a stated time, when it is due, as an ISO 8601 timestamp with the offset (e.g. 2026-08-20T21:20:00+03:00). Null for anything without a time — most tasks have none, and a made-up deadline is worse than no deadline.",
+                    },
                   },
                   required: ["text", "category", "people"],
                 },
@@ -549,8 +611,20 @@ Categories:
 - idea: a concept or possibility they are exploring or want to build.
 - log: body, health, workouts, sleep, food, physical sensations ONLY — not general daily narration.
 
-People: extract the human beings named in each unit, exactly as written. Shops, apps, brands, companies and places are NOT people — Temu, Trello, Sofia are not names to return.`,
-      messages: [{ role: "user", content: clean }],
+People: extract the human beings named in each unit, exactly as written. Shops, apps, brands, companies and places are NOT people — Temu, Trello, Sofia are not names to return.
+
+Due times: when a task states when it happens, return it as dueAt. "tonight at 21:20", "утре в 8:30", "Wednesday morning" are all times; resolve them against the current time given below and return a full ISO 8601 timestamp with the offset. Leave dueAt null when no time is stated — most tasks have none, and inventing a deadline puts a reminder in someone's calendar for a moment they never chose.`,
+      messages: [{
+        role: "user",
+        content: [
+          // Relative times are the common case in speech — nobody dictates a
+          // date — and they cannot be resolved without knowing the speaker's
+          // clock. The server's own clock is not it: this is deployed in North
+          // America and used in Bulgaria.
+          nowIso ? `Current time where the user is: ${nowIso}${zone ? ` (${zone})` : ""}` : "",
+          clean,
+        ].filter(Boolean).join("\n\n"),
+      }],
     });
 
     const toolUse = response.content.find(b => b.type === "tool_use");
@@ -559,7 +633,7 @@ People: extract the human beings named in each unit, exactly as written. Shops, 
     }
 
     const input = toolUse.input as {
-      units: { text: string; category: string; people: string[] }[];
+      units: { text: string; category: string; people: string[]; dueAt?: string | null }[];
     };
 
     if (!Array.isArray(input?.units) || input.units.length === 0) {
@@ -573,6 +647,15 @@ People: extract the human beings named in each unit, exactly as written. Shops, 
         category: (VALID_CATEGORIES.includes(u.category as Category)
           ? u.category
           : heuristicCategory(u.text)) as Category,
+        // Only trusted if it parses and is not in the past by more than a day:
+        // a model that misreads "утре" as last year would otherwise put a
+        // reminder in a calendar for a moment that has already gone.
+        dueAt: (() => {
+          if (typeof u.dueAt !== "string" || Number.isNaN(Date.parse(u.dueAt))) return null;
+          const due = new Date(u.dueAt);
+          const floor = Date.now() - 24 * 60 * 60 * 1000;
+          return due.getTime() >= floor ? due.toISOString() : null;
+        })(),
         people: Array.isArray(u.people)
           ? u.people.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
           : [],
