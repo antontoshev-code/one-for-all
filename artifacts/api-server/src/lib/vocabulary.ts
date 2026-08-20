@@ -147,3 +147,52 @@ export function correctTranscript(text: string, vocabulary: string[]): Correctio
 
   return { text: corrected, corrections };
 }
+
+/**
+ * Terms of address and kinship — обращения.
+ *
+ * These caused a bug worth remembering: a capture asking "Дали вуйчо ще се
+ * чувства окей?" came back as "Войчо", which then read as a person's name and
+ * was offered as someone to add. A general model has no reason to expect
+ * "вуйчо" in the middle of a sentence about a trip, and one vowel is all it
+ * takes to turn a word for uncle into a plausible Bulgarian name.
+ *
+ * They matter more than ordinary vocabulary because of what they are: the words
+ * people use for the people closest to them. A diary is full of them, and every
+ * one that transcribes wrong looks like a stranger.
+ *
+ * Bulgarian distinguishes maternal and paternal relatives where English does
+ * not — вуйчо is a mother's brother, чичо a father's — so both are listed
+ * rather than collapsed.
+ */
+export const ADDRESS_BG = [
+  // Immediate family
+  "мама", "майка", "татко", "баща", "тати", "мамо", "тате",
+  "баба", "дядо", "син", "сине", "дъщеря", "дъще", "брат", "сестра",
+  "батко", "кака", "внук", "внучка", "правнук", "правнучка",
+  // Extended, where Bulgarian is more precise than English
+  "вуйчо", "вуйна", "чичо", "стрина", "леля", "вуйчовци",
+  "братовчед", "братовчедка", "племенник", "племенница",
+  // In-laws and the wedding party, which Bulgarian names carefully
+  "зет", "снаха", "свекър", "свекърва", "тъст", "тъща", "шурей", "балдъза",
+  "кум", "кума", "кръстник", "кръстница",
+  // Partners
+  "съпруг", "съпруга", "мъж", "жена", "годеник", "годеница", "гадже",
+  // Everyday address
+  "приятел", "приятелка", "колега", "колежка", "съсед", "съседка",
+  "шеф", "шефе", "господине", "госпожо", "госпожице", "момче", "момиче",
+  "миличък", "миличка", "скъпи", "скъпа", "съкровище", "сърце", "душа",
+];
+
+export const ADDRESS_EN = [
+  "mum", "mom", "mummy", "mommy", "mother", "dad", "daddy", "father",
+  "grandma", "grandpa", "granny", "grandad", "granddad", "grandmother",
+  "grandfather", "nan", "nana",
+  "aunt", "auntie", "uncle", "cousin", "nephew", "niece",
+  "brother", "sister", "son", "daughter", "grandson", "granddaughter",
+  "husband", "wife", "partner", "fiancé", "fiancée",
+  "stepmum", "stepdad", "mother-in-law", "father-in-law",
+  "godmother", "godfather", "godson", "goddaughter",
+  "boss", "colleague", "neighbour", "neighbor", "mate", "buddy", "flatmate",
+  "roommate", "landlord", "landlady",
+];

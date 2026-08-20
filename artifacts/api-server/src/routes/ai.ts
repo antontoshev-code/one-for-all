@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 import { db, eq, and, notDeleted, peopleTable, vocabularyTable } from "@workspace/db";
-import { correctTranscript, PLACES_BG, TERMS } from "../lib/vocabulary";
+import { correctTranscript, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN } from "../lib/vocabulary";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -184,7 +184,7 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     // A word the user put back is removed from the correction target list, so
     // the app cannot keep making a correction they have already rejected.
     const kept = new Set(personal.keep);
-    const vocabulary = [...personal.use, ...PLACES_BG, ...TERMS]
+    const vocabulary = [...personal.use, ...PLACES_BG, ...TERMS, ...ADDRESS_BG, ...ADDRESS_EN]
       .filter(w => !kept.has(w.toLowerCase()));
 
     // The prompt gets the personal words only. It is capped at roughly 224

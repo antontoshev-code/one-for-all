@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { correctTranscript, editDistance, PLACES_BG, TERMS } from "./vocabulary.ts";
+import { correctTranscript, editDistance, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN } from "./vocabulary.ts";
 
 describe("editDistance", () => {
   test("counts single-character edits", () => {
@@ -90,10 +90,21 @@ describe("correctTranscript", () => {
     assert.deepEqual(r.corrections, []);
   });
 
+  test("repairs a kinship term heard as a name", () => {
+    // "Дали вуйчо ще се чувства окей?" came back as "Войчо", which then read
+    // as a person and was offered as someone to add. One vowel turns the word
+    // for uncle into a plausible Bulgarian name.
+    const r = correctTranscript("Дали Войчо ще се чувства окей", ADDRESS_BG);
+    assert.equal(r.text, "Дали вуйчо ще се чувства окей");
+  });
+
   test("ships usable seed lists", () => {
     assert.ok(PLACES_BG.includes("София"));
     assert.ok(PLACES_BG.includes("Столична община"));
     assert.ok(TERMS.includes("тараторче"));
     assert.ok(TERMS.includes("Trello"));
+    assert.ok(ADDRESS_BG.includes("вуйчо"));
+    assert.ok(ADDRESS_BG.includes("чичо"));
+    assert.ok(ADDRESS_EN.includes("uncle"));
   });
 });

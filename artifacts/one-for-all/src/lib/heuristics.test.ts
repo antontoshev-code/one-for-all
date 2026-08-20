@@ -90,6 +90,26 @@ describe("detectNamesInChunk", () => {
     assert.deepEqual(r.map(x => x.suggestedName), ["Sarah"]);
   });
 
+  test("does not offer a kinship term as a person", () => {
+    // "Вуйчо" means uncle. Capitalised mid-sentence it is indistinguishable
+    // from a name by shape alone, and Bulgarian has many of these.
+    const r = detectNamesInChunk("питах Вуйчо и Елена вчера", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Елена"]);
+  });
+
+  test("does not offer an English kinship term either", () => {
+    const r = detectNamesInChunk("asked Grandma and Sarah about it", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Sarah"]);
+  });
+
+  test("still matches a person actually called Баба", () => {
+    // Suppression applies to new suggestions only. Somebody who created a
+    // person under that name must still have them recognised.
+    const people = [{ id: 7, name: "Баба", descriptor: null }];
+    const r = detectNamesInChunk("говорих с Баба днес", people);
+    assert.equal(r[0]?.matchedPerson?.id, 7);
+  });
+
   test("returns nothing for text with no names", () => {
     assert.deepEqual(detectNamesInChunk("went for a run and made lunch", []), []);
   });

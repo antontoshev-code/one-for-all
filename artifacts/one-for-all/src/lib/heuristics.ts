@@ -84,6 +84,43 @@ export function splitIntoChunks(text: string): string[] {
  * over false-positives (flagging a common word as a person).
  */
 /**
+ * Terms of address — обращения — which name a relationship, not a person.
+ *
+ * "Дали Вуйчо ще се чувства окей?" should not offer Вуйчо as someone to add:
+ * it means uncle. Capitalised at the start of a sentence, or mangled by
+ * transcription, these look exactly like names, and Bulgarian has a lot of them
+ * because it distinguishes maternal from paternal relatives where English does
+ * not.
+ *
+ * This only suppresses *new* suggestions. Somebody who has created a person
+ * called Баба is still matched, because matching an existing person happens
+ * before any of these checks.
+ */
+const ADDRESS_WORDS = new Set([
+  // ── Bulgarian ───────────────────────────────────────────────────────────
+  "Мама", "Майка", "Татко", "Баща", "Тати", "Тате", "Мамо",
+  "Баба", "Дядо", "Син", "Сине", "Дъщеря", "Брат", "Сестра", "Батко", "Кака",
+  "Внук", "Внучка", "Вуйчо", "Вуйна", "Чичо", "Стрина", "Леля",
+  "Братовчед", "Братовчедка", "Племенник", "Племенница",
+  "Зет", "Снаха", "Свекър", "Свекърва", "Тъст", "Тъща",
+  "Кум", "Кума", "Кръстник", "Кръстница",
+  "Съпруг", "Съпруга", "Годеник", "Годеница", "Гадже",
+  "Приятел", "Приятелка", "Колега", "Колежка", "Съсед", "Съседка",
+  "Шеф", "Шефе", "Господине", "Госпожо", "Госпожице", "Момче", "Момиче",
+  "Миличък", "Миличка", "Скъпи", "Скъпа", "Съкровище",
+
+  // ── English ─────────────────────────────────────────────────────────────
+  "Mum", "Mom", "Mummy", "Mommy", "Mother", "Dad", "Daddy", "Father",
+  "Grandma", "Grandpa", "Granny", "Grandad", "Granddad", "Grandmother",
+  "Grandfather", "Nan", "Nana",
+  "Aunt", "Auntie", "Uncle", "Cousin", "Nephew", "Niece",
+  "Brother", "Sister", "Son", "Daughter", "Grandson", "Granddaughter",
+  "Husband", "Wife", "Partner", "Boss", "Colleague", "Neighbour", "Neighbor",
+  "Mate", "Buddy", "Flatmate", "Roommate", "Landlord", "Landlady",
+  "Godmother", "Godfather",
+]);
+
+/**
  * Places, which are capitalised exactly like people and are not people.
  *
  * "разходка до Италия с Елена" offered Италия as a person to add. The detector
@@ -275,6 +312,8 @@ export function detectNamesInChunk(
     // A country reads exactly like a name to this detector. "разходка до
     // Италия с Елена" offered Италия as a person to add.
     if (PLACE_WORDS.has(candidate)) continue;
+    // "Вуйчо" means uncle, not somebody called Вуйчо.
+    if (ADDRESS_WORDS.has(candidate)) continue;
     if (candidate.length < 4) continue;
 
     seen.add(key);
