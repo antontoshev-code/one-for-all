@@ -46,6 +46,13 @@ export default function Home() {
   const [mode, setMode] = useState<"idle" | "recording" | "transcribing" | "editing" | "text">("idle");
   const [content, setContent] = useState("");
   const [transcriptBadge, setTranscriptBadge] = useState<TranscriptBadge>("real");
+
+  /**
+   * Words the app repaired against your vocabulary, still on offer rather than
+   * settled. Correcting a transcript is useful; doing it invisibly is editing
+   * someone's words, so each one is shown and can be put back in one tap.
+   */
+  const [corrections, setCorrections] = useState<{ from: string; to: string }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
@@ -125,6 +132,7 @@ export default function Home() {
 
         if (result.source === "whisper" && result.transcript) {
           setContent(result.transcript);
+          setCorrections(result.corrections);
           setTranscriptBadge("real");
         } else if (result.source === "no-speech") {
           // Nothing audible. Say so plainly rather than blaming transcription —
@@ -406,6 +414,33 @@ export default function Home() {
                     <span>Here are your thoughts — check before saving</span>
                   </div>
                 )}
+                {/* Did you mean — one chip per repaired word. */}
+                {transcriptBadge === "real" && corrections.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 px-1">
+                    <span className="text-xs text-muted-foreground">Did you mean</span>
+                    {corrections.map((c, i) => (
+                      <button
+                        key={`${c.from}-${i}`}
+                        type="button"
+                        onClick={() => {
+                          // Put the original word back, and drop the chip. Only
+                          // the first occurrence: repeated words were corrected
+                          // separately and each has its own chip.
+                          setContent(prev => prev.replace(c.to, c.from));
+                          setCorrections(prev => prev.filter((_, idx) => idx !== i));
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs hover:bg-secondary/70 transition-colors"
+                        title={`Change "${c.to}" back to "${c.from}"`}
+                      >
+                        <span className="text-muted-foreground line-through">{c.from}</span>
+                        <span aria-hidden>→</span>
+                        <span className="font-medium text-foreground">{c.to}</span>
+                        <span className="text-muted-foreground ml-0.5">undo</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {transcriptBadge === "no-speech" && (
                   <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-muted-foreground rounded-full text-sm self-start">
                     <AlertCircle className="w-4 h-4 shrink-0" />

@@ -72,7 +72,7 @@ function heuristicSplit(text: string): string[] {
 
 // ── POST /ai/transcribe ───────────────────────────────────────────────────
 // Accepts multipart/form-data with field "audio".
-// Returns { transcript, source: 'whisper' | 'unavailable' | 'error' }.
+// Returns { transcript, corrections, source: 'whisper' | 'unavailable' | 'error' }.
 
 /**
  * Build a vocabulary hint for Whisper from the names this user already keeps.
@@ -221,7 +221,14 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
       }
     }
 
-    return res.json({ transcript, source: transcript ? "whisper" : "no-speech" });
+    // Corrections are returned, not just applied. Rewriting words in someone's
+    // diary without showing them is the part of this that was uncomfortable —
+    // shown, each one is a suggestion they can reject in one tap.
+    return res.json({
+      transcript,
+      corrections,
+      source: transcript ? "whisper" : "no-speech",
+    });
   } catch (err) {
     logger.error({ err }, "Whisper transcription failed");
     return res.json({ transcript: "", source: "error", reason: String(err) });

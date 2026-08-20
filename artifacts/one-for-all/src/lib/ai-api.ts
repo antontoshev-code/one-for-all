@@ -24,6 +24,11 @@ export type TranscriptSource = "whisper" | "no-speech" | "unavailable" | "error"
 export interface TranscriptResult {
   transcript: string;
   source: TranscriptSource;
+  /**
+   * Words repaired against the vocabulary, so the user can see and reject them.
+   * Applying a correction without showing it would be editing their words.
+   */
+  corrections: { from: string; to: string }[];
 }
 
 /**
@@ -41,15 +46,16 @@ export async function transcribeAudio(blob: Blob): Promise<TranscriptResult> {
     formData.append("audio", blob, `recording.${ext}`);
 
     const res = await fetch("/api/ai/transcribe", { method: "POST", body: formData });
-    if (!res.ok) return { transcript: "", source: "error" };
+    if (!res.ok) return { transcript: "", source: "error", corrections: [] };
 
     const data = await res.json();
     return {
       transcript: data.transcript ?? "",
       source: (data.source as TranscriptSource) ?? "error",
+      corrections: Array.isArray(data.corrections) ? data.corrections : [],
     };
   } catch {
-    return { transcript: "", source: "error" };
+    return { transcript: "", source: "error", corrections: [] };
   }
 }
 

@@ -16,6 +16,8 @@ export interface AuthUser {
   email: string;
   name: string;
   image?: string | null;
+  /** ISO timestamp. Used to recognise an account created moments ago. */
+  createdAt?: string;
 }
 
 interface AuthResult {

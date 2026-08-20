@@ -105,6 +105,52 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
  * resolves.
  */
 
+/**
+ * Says so when signing in has just created an account.
+ *
+ * There is no "sign up with Google" — pressing Continue with Google creates an
+ * account when none matches, which is how every OAuth login works. That is
+ * indistinguishable from a lost diary if you expected to find your entries, so
+ * it gets said out loud rather than left to be discovered.
+ *
+ * Only shown for accounts created in the last couple of minutes, and only once
+ * per browser session: it is feedback about the sign-in that just happened, not
+ * a standing notice.
+ */
+const NEW_ACCOUNT_WINDOW_MS = 2 * 60 * 1000;
+
+function NewAccountNotice({ user }: { user: AuthUser }) {
+  const [dismissed, setDismissed] = useState(
+    () => sessionStorage.getItem('ofa-new-account-seen') === user.id,
+  );
+
+  if (dismissed || !user.createdAt) return null;
+  const age = Date.now() - new Date(user.createdAt).getTime();
+  if (!Number.isFinite(age) || age > NEW_ACCOUNT_WINDOW_MS || age < 0) return null;
+
+  return (
+    <div className="bg-primary/10 border-b border-primary/20 px-4 py-3">
+      <div className="max-w-2xl mx-auto flex items-start gap-3">
+        <p className="text-sm text-foreground/80 leading-relaxed flex-1">
+          <strong className="text-foreground">Welcome — this is a new account.</strong>{' '}
+          It was created for <strong className="text-foreground">{user.email}</strong>.
+          If you expected to find entries here, you may have signed in with a
+          different email address than last time.
+        </p>
+        <button
+          onClick={() => {
+            sessionStorage.setItem('ofa-new-account-seen', user.id);
+            setDismissed(true);
+          }}
+          className="text-sm text-muted-foreground hover:text-foreground shrink-0"
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AuthGate({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null | undefined>(undefined);
   const [location] = useLocation();
@@ -124,7 +170,12 @@ function AuthGate({ children }: { children: ReactNode }) {
 
   if (user === null) return <Login onSignedIn={refresh} />;
 
-  return <>{children}</>;
+  return (
+    <>
+      <NewAccountNotice user={user} />
+      {children}
+    </>
+  );
 }
 
 function App() {
