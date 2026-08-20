@@ -7,6 +7,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, ArrowLeft, Trash2, Unlink, AlertCircle, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { COUNTRY_SUGGESTIONS } from "@/lib/countries";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { Input } from "@/components/ui/input";
@@ -21,18 +22,41 @@ import { formatDate } from "@/lib/utils";
 // ── Inline-editable detail row ────────────────────────────────────────────
 
 function DetailRow({
-  label, value, placeholder, onSave,
+  label, value, placeholder, onSave, suggestions, date,
 }: {
   label: string;
   value: string | null | undefined;
   placeholder: string;
   onSave: (next: string) => Promise<void>;
+  /**
+   * Offered, not enforced. A datalist suggests without closing the door on
+   * "Yorkshire" or "the village near Bansko" — a dropdown would tell someone
+   * their own answer is wrong.
+   */
+  suggestions?: string[];
+  /** Show a calendar picker, with a way back to free text for partial dates. */
+  date?: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  /**
+   * Birthdays are stored as text on purpose — plenty of people know the month
+   * and not the year. The calendar is the default because most of the time the
+   * date is known exactly, and this is the way out when it isn't.
+   */
+  const [freeText, setFreeText] = useState(false);
 
-  const begin = () => { setDraft(value || ""); setIsEditing(true); };
+  const listId = `${label.replace(/\s+/g, "-").toLowerCase()}-suggestions`;
+  const showDatePicker = date && !freeText;
+
+  const begin = () => {
+    setDraft(value || "");
+    // A stored value the calendar cannot represent means free text was used
+    // before; reopening in calendar mode would silently discard it.
+    setFreeText(Boolean(date && value && !/^\d{4}-\d{2}-\d{2}$/.test(value)));
+    setIsEditing(true);
+  };
 
   const commit = async () => {
     if (isSaving) return;
@@ -52,17 +76,37 @@ function DetailRow({
       <span className="text-sm text-muted-foreground shrink-0">{label}</span>
       {isEditing ? (
         <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
-          <Input
-            autoFocus
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") setIsEditing(false);
-            }}
-            placeholder={placeholder}
-            className="h-8 text-sm bg-background max-w-[16rem]"
-          />
+          <div className="flex flex-col items-end gap-1 flex-1 min-w-0">
+            <Input
+              autoFocus
+              type={showDatePicker ? "date" : "text"}
+              // Nobody has a birthday in the future.
+              max={showDatePicker ? new Date().toISOString().slice(0, 10) : undefined}
+              list={suggestions ? listId : undefined}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter") commit();
+                if (e.key === "Escape") setIsEditing(false);
+              }}
+              placeholder={placeholder}
+              className="h-8 text-sm bg-background max-w-[16rem] w-full"
+            />
+            {suggestions && (
+              <datalist id={listId}>
+                {suggestions.map(s => <option key={s} value={s} />)}
+              </datalist>
+            )}
+            {date && (
+              <button
+                type="button"
+                onClick={() => { setFreeText(!freeText); setDraft(""); }}
+                className="text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                {freeText ? "Use the calendar" : "Only know the month?"}
+              </button>
+            )}
+          </div>
           <Button
             variant="ghost" size="icon"
             className="w-8 h-8 rounded-full text-muted-foreground hover:bg-accent shrink-0"
@@ -624,18 +668,21 @@ export default function PersonDetail() {
             value={person.birthday}
             placeholder="e.g. 12 October, or just October"
             onSave={next => savePatch({ birthday: next })}
+            date
           />
           <DetailRow
             label="From"
             value={person.countryOfOrigin}
             placeholder="Country of origin"
             onSave={next => savePatch({ countryOfOrigin: next })}
+            suggestions={COUNTRY_SUGGESTIONS}
           />
           <DetailRow
             label="Lives in"
             value={person.countryOfResidence}
             placeholder="Only if different"
             onSave={next => savePatch({ countryOfResidence: next })}
+            suggestions={COUNTRY_SUGGESTIONS}
           />
           <DetailRow
             label="How we met"
