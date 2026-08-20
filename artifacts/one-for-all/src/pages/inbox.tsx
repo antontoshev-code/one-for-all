@@ -188,6 +188,20 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
    */
   const [captureNames, setCaptureNames] = useState<PieceName[]>([]);
 
+  /**
+   * Whether this capture reads as more than one thought.
+   *
+   * Splitting was a small grey link under a large Accept button, so the
+   * obvious action was to file a recording covering three unrelated things as
+   * one entry. When the capture is plainly multi-part the emphasis swaps:
+   * splitting becomes the offered action and accepting whole stays available.
+   *
+   * The local sentence splitter decides, not the AI. This runs on every card
+   * render and must be instant and free — the real split still asks Claude
+   * once the user commits to it.
+   */
+  const looksMultiPart = splitIntoChunks(entry.content ?? "").length > 1;
+
   useEffect(() => {
     if (!entry.content) return;
     setCaptureNames(asPieceNames(detectNamesInChunk(entry.content, people || [])));
@@ -667,15 +681,28 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
             </div>
           ) : (
             <div className="flex gap-2">
-              <Button
-                className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90 h-10"
-                onClick={() => {
-                  logEvent('suggestion_accepted', { category: suggestedCat, entryId: entry.id });
-                  handleProcess(suggestedCat as Category);
-                }}
-              >
-                Accept
-              </Button>
+              {looksMultiPart ? (
+                <Button
+                  className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90 h-10"
+                  onClick={handleInitSplit}
+                  disabled={isSplitLoading}
+                >
+                  {isSplitLoading
+                    ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    : <Scissors className="w-4 h-4 mr-2" />}
+                  {isSplitLoading ? 'Analysing…' : 'Split into pieces'}
+                </Button>
+              ) : (
+                <Button
+                  className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90 h-10"
+                  onClick={() => {
+                    logEvent('suggestion_accepted', { category: suggestedCat, entryId: entry.id });
+                    handleProcess(suggestedCat as Category);
+                  }}
+                >
+                  Accept
+                </Button>
+              )}
               <Button
                 variant="outline"
                 className="rounded-full h-10 px-4"
@@ -693,16 +720,28 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
             </div>
           )}
 
-          <button
-            onClick={handleInitSplit}
-            disabled={isSplitLoading}
-            className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSplitLoading
-              ? <Loader2 className="w-3 h-3 animate-spin" />
-              : <Scissors className="w-3 h-3" />}
-            {isSplitLoading ? 'Analyzing…' : 'Split into pieces'}
-          </button>
+          {looksMultiPart ? (
+            <button
+              onClick={() => {
+                logEvent('suggestion_accepted', { category: suggestedCat, entryId: entry.id });
+                handleProcess(suggestedCat as Category);
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+            >
+              Keep it as one {suggestedCat} entry
+            </button>
+          ) : (
+            <button
+              onClick={handleInitSplit}
+              disabled={isSplitLoading}
+              className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSplitLoading
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Scissors className="w-3 h-3" />}
+              {isSplitLoading ? 'Analysing…' : 'Split into pieces'}
+            </button>
+          )}
         </div>
       )}
 

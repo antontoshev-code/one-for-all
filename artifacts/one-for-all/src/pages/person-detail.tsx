@@ -132,6 +132,11 @@ function AliasEditor({
         Other spellings this person is known by. Transcription and different alphabets produce
         variants — adding them here means a mention is recognised however it's written.
       </p>
+      <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+        Add as many as you like — type one and press <kbd className="px-1 py-0.5 rounded bg-secondary text-foreground text-[10px]">Enter</kbd>,
+        then type the next. For example <span className="text-foreground">Петя</span>,{" "}
+        <span className="text-foreground">Petya</span>, <span className="text-foreground">Pepi</span>.
+      </p>
 
       {aliases.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
