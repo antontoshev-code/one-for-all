@@ -18,6 +18,8 @@ tags:
     description: Original captures and what they were split into
   - name: data
     description: Export and erasure
+  - name: vocabulary
+    description: Per-user words that improve transcription
 paths:
   /healthz:
     get:
@@ -432,8 +434,129 @@ paths:
                     type: boolean
 
 
+  # ── Vocabulary ─────────────────────────────────────────────────────────────
+  # Words this user is known to use. Transcription mangles proper nouns, and no
+  # general model knows that this person says "тараторче" or has a friend called
+  # Дани. Strictly per-user: there is no path from one person's words to
+  # another's transcription.
+  /vocabulary:
+    get:
+      operationId: listVocabulary
+      tags: [vocabulary]
+      summary: The user's own word list
+      responses:
+        "200":
+          description: Words, both learned and kept
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VocabularyWord"
+
+  /vocabulary/learn:
+    post:
+      operationId: learnVocabulary
+      tags: [vocabulary]
+      summary: Remember words the user corrected by hand
+      description: >
+        Called when a capture is saved after editing. The server compares the
+        transcript it produced against what was saved and keeps the single-word
+        repairs. Rewrites are ignored: once the word count changes, position no
+        longer identifies the same word.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [original, edited]
+              properties:
+                original:
+                  type: string
+                  description: The transcript as delivered
+                edited:
+                  type: string
+                  description: What the user actually saved
+      responses:
+        "200":
+          description: How many words were learned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  learned:
+                    type: integer
+                  reason:
+                    type: string
+
+  /vocabulary/keep:
+    post:
+      operationId: keepWord
+      tags: [vocabulary]
+      summary: Stop correcting a word the user put back
+      description: >
+        Undoing a suggested correction says the original was right. Without
+        this the app would repeat the same wrong correction on every capture.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [word]
+              properties:
+                word:
+                  type: string
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /vocabulary/{id}:
+    delete:
+      operationId: deleteVocabularyWord
+      tags: [vocabulary]
+      summary: Remove a word that was learned wrongly
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+
 components:
   schemas:
+    VocabularyWord:
+      type: object
+      required: [id, word, kind, source]
+      properties:
+        id:
+          type: integer
+        word:
+          type: string
+        kind:
+          type: string
+          enum: [use, keep]
+          description: >
+            "use" biases transcription toward the word and corrects towards it.
+            "keep" marks a word never to be corrected away, recorded when the
+            user undoes a suggestion.
+        source:
+          type: string
+          enum: [learned, manual]
+
     Capture:
       type: object
       required: [id, content, createdAt]

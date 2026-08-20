@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import vocabularyRouter from "./vocabulary";
 import entriesRouter from "./entries";
 import peopleRouter from "./people";
 import aiRouter from "./ai";
@@ -18,6 +19,7 @@ router.use(entriesRouter);
 router.use(peopleRouter);
 router.use(aiRouter);
 router.use(dataRouter);
+router.use(vocabularyRouter);
 router.use(capturesRouter);
 
 export default router;

@@ -4,7 +4,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
-import { db, eq, and, notDeleted, peopleTable } from "@workspace/db";
+import { db, eq, and, notDeleted, peopleTable, vocabularyTable } from "@workspace/db";
 import { correctTranscript, PLACES_BG, TERMS } from "../lib/vocabulary";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -89,25 +89,42 @@ function heuristicSplit(text: string): string[] {
  * is ignored, so spending it on the most recently updated people is better than
  * letting it truncate arbitrarily.
  */
-async function userVocabulary(userId: string): Promise<string[]> {
+interface UserVocabulary {
+  /** Words to bias toward and correct towards. */
+  use: string[];
+  /** Words the user put back after a correction, never to be corrected again. */
+  keep: string[];
+}
+
+async function userVocabulary(userId: string): Promise<UserVocabulary> {
   try {
-    const people = await db
-      .select({ name: peopleTable.name, aliases: peopleTable.aliases })
-      .from(peopleTable)
-      // Someone you deleted should not be whispered back into transcriptions.
-      .where(and(eq(peopleTable.userId, userId), notDeleted(peopleTable)));
+    const [people, learned] = await Promise.all([
+      db
+        .select({ name: peopleTable.name, aliases: peopleTable.aliases })
+        .from(peopleTable)
+        // Someone you deleted should not be whispered back into transcriptions.
+        .where(and(eq(peopleTable.userId, userId), notDeleted(peopleTable))),
+      db
+        .select({ word: vocabularyTable.word, kind: vocabularyTable.kind })
+        .from(vocabularyTable)
+        .where(eq(vocabularyTable.userId, userId)),
+    ]);
 
     // Full names are split so "Петя Иванова" repairs a lone "Пети" too.
-    return [...new Set(
-      people
-        .flatMap(p => [p.name, ...(p.aliases ?? [])])
-        .flatMap(w => [w, ...w.split(" ")])
-        .map(w => w.trim())
-        .filter(Boolean),
-    )];
+    const fromPeople = people
+      .flatMap(p => [p.name, ...(p.aliases ?? [])])
+      .flatMap(w => [w, ...w.split(" ")]);
+
+    const fromLearned = learned.filter(w => w.kind === "use").map(w => w.word);
+    const keep = learned.filter(w => w.kind === "keep").map(w => w.word.toLowerCase());
+
+    return {
+      use: [...new Set([...fromPeople, ...fromLearned].map(w => w.trim()).filter(Boolean))],
+      keep,
+    };
   } catch (err) {
     logger.warn({ err }, "Could not load vocabulary — transcribing without it");
-    return [];
+    return { use: [], keep: [] };
   }
 }
 
@@ -162,13 +179,18 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     // The user's own people, plus the curated lists. Places and product names
     // are the other half of what a general model mangles in a Bulgarian
     // sentence — "Столична" and "Trello" are not words it expects there.
-    const personalWords = await userVocabulary(req.userId);
-    const vocabulary = [...personalWords, ...PLACES_BG, ...TERMS];
+    const personal = await userVocabulary(req.userId);
+
+    // A word the user put back is removed from the correction target list, so
+    // the app cannot keep making a correction they have already rejected.
+    const kept = new Set(personal.keep);
+    const vocabulary = [...personal.use, ...PLACES_BG, ...TERMS]
+      .filter(w => !kept.has(w.toLowerCase()));
 
     // The prompt gets the personal words only. It is capped at roughly 224
     // tokens, so spending it on a fixed list would crowd out the names that
     // actually change per user — and the correction pass below covers the rest.
-    const prompt = vocabularyHint(personalWords);
+    const prompt = vocabularyHint(personal.use);
 
     const result = await openai.audio.transcriptions.create({
       file: audioFile,

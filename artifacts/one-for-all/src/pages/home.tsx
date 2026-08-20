@@ -53,6 +53,14 @@ export default function Home() {
    * someone's words, so each one is shown and can be put back in one tap.
    */
   const [corrections, setCorrections] = useState<{ from: string; to: string }[]>([]);
+
+  /**
+   * The transcript exactly as it arrived, kept so that what the user changed
+   * before saving can be worked out. Their edit is the most reliable evidence
+   * of what was actually said — it is not a guess, it is the person who was
+   * there telling us.
+   */
+  const [originalTranscript, setOriginalTranscript] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
@@ -133,6 +141,7 @@ export default function Home() {
         if (result.source === "whisper" && result.transcript) {
           setContent(result.transcript);
           setCorrections(result.corrections);
+          setOriginalTranscript(result.transcript);
           setTranscriptBadge("real");
         } else if (result.source === "no-speech") {
           // Nothing audible. Say so plainly rather than blaming transcription —
@@ -296,6 +305,17 @@ export default function Home() {
         },
       });
 
+      // ── Step 1b: learn from what the user changed ──────────────────────────
+      // Fire-and-forget on purpose. Improving future transcription must never
+      // delay, or risk, saving the thing they just said.
+      if (originalTranscript && content !== originalTranscript) {
+        fetch("/api/vocabulary/learn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ original: originalTranscript, edited: content }),
+        }).catch(err => console.warn("[vocabulary] learn failed", err));
+      }
+
       // ── Step 2: AI categorisation (non-blocking on failure) ─────────────────
       // /api/ai/categorize is the single categoriser for the whole app — the
       // same endpoint the split review uses, so Home and Inbox can't disagree
@@ -428,6 +448,15 @@ export default function Home() {
                           // separately and each has its own chip.
                           setContent(prev => prev.replace(c.to, c.from));
                           setCorrections(prev => prev.filter((_, idx) => idx !== i));
+
+                          // Rejecting a correction is information too: without
+                          // recording it, the same wrong suggestion would come
+                          // back on every capture with no way to stop it.
+                          fetch("/api/vocabulary/keep", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ word: c.from }),
+                          }).catch(err => console.warn("[vocabulary] keep failed", err));
                         }}
                         className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs hover:bg-secondary/70 transition-colors"
                         title={`Change "${c.to}" back to "${c.from}"`}
