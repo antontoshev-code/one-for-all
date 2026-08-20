@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { detectNamesInChunk } from "./heuristics.ts";
+import {
+  detectNamesInChunk, groupIntoUnits, looksWorthSplitting, categorizeContent,
+} from "./heuristics.ts";
 
 const PEOPLE = [
   { id: 1, name: "Petya Ivanova", descriptor: "Studentina" },
@@ -110,7 +112,103 @@ describe("detectNamesInChunk", () => {
     assert.equal(r[0]?.matchedPerson?.id, 7);
   });
 
+  test("does not offer a shop as a person", () => {
+    // "Очаквах доставка от Тему" offered Тему as somebody to add.
+    const r = detectNamesInChunk("очаквах доставка от Тему с Елена", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Елена"]);
+  });
+
+  test("does not offer an app as a person", () => {
+    const r = detectNamesInChunk("wrote it in Notion with Sarah", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Sarah"]);
+  });
+
   test("returns nothing for text with no names", () => {
     assert.deepEqual(detectNamesInChunk("went for a run and made lunch", []), []);
+  });
+});
+
+describe("groupIntoUnits", () => {
+  test("keeps a day's account as one entry", () => {
+    // This capture was split into eight cards, one of which was
+    // "Днес беше доста приятен ден." on its own. An account of a day is one
+    // entry however many things happened in it.
+    const day = "Днес беше доста приятен ден. Очаквах доставка, обаче никой не дойде. " +
+      "Слязох до София с колата и там тренирах. После дойде Елена.";
+    const units = groupIntoUnits(day);
+    assert.equal(units.length, 1);
+    assert.equal(units[0].category, "journal");
+  });
+
+  test("separates a task from the story around it", () => {
+    // The reason to split is that a part belongs somewhere else — a task
+    // belongs in the task list, where the user will look for it.
+    const text = "Днес беше приятен ден и се видяхме с Елена. За утре имам задача да подготвя чая.";
+    const units = groupIntoUnits(text);
+    assert.equal(units.length, 2);
+    assert.equal(units[0].category, "journal");
+    assert.equal(units[1].category, "task");
+  });
+
+  test("returns one unit for a single sentence", () => {
+    const units = groupIntoUnits("Днес беше доста приятен ден.");
+    assert.equal(units.length, 1);
+  });
+
+  test("does not lose any text when grouping", () => {
+    // Whatever the grouping decides, every word the user said has to survive.
+    const text = "Първо изречение. Второ изречение. За утре имам задача да звънна.";
+    const joined = groupIntoUnits(text).map(u => u.text).join(" ");
+    for (const word of ["Първо", "Второ", "задача", "звънна"]) {
+      assert.ok(joined.includes(word), `lost "${word}"`);
+    }
+  });
+});
+
+describe("looksWorthSplitting", () => {
+  test("a plain diary entry is not worth splitting", () => {
+    // Otherwise the Split button gets promoted over Accept on an entry that
+    // should stay whole, which is how eight cards happened.
+    assert.equal(
+      looksWorthSplitting("Днес беше приятен ден. Видях се с Елена. Беше хубаво."),
+      false,
+    );
+  });
+
+  test("a diary entry containing a task is", () => {
+    assert.equal(
+      looksWorthSplitting("Днес беше приятен ден. За утре имам задача да подготвя чая."),
+      true,
+    );
+  });
+});
+
+describe("categorizeContent in Bulgarian", () => {
+  test("recognises a Bulgarian task", () => {
+    // The task words were English-only, so every Bulgarian capture came out as
+    // one undifferentiated journal entry.
+    assert.equal(categorizeContent("За утре имам задача да подготвя чая"), "task");
+    assert.equal(categorizeContent("трябва да звънна на Петя"), "task");
+  });
+
+  test("recognises a Bulgarian workout", () => {
+    assert.equal(categorizeContent("тренирах днес"), "log");
+    assert.equal(categorizeContent("спах зле, събудих се уморен"), "log");
+  });
+
+  test("recognises a Bulgarian idea", () => {
+    assert.equal(categorizeContent("хрумна ми идея за приложението"), "idea");
+  });
+
+  test("treats a passing workout mention as narrative", () => {
+    // The sentence has to be about the body, not merely contain a word for it.
+    assert.equal(
+      categorizeContent("Слязох до София с колата и там тренирах"),
+      "journal",
+    );
+  });
+
+  test("still recognises an English workout", () => {
+    assert.equal(categorizeContent("Had a great workout this morning, felt great"), "log");
   });
 });

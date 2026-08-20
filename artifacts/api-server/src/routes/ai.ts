@@ -5,7 +5,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 import { db, eq, and, notDeleted, peopleTable, vocabularyTable } from "@workspace/db";
-import { correctTranscript, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN } from "../lib/vocabulary";
+import {
+  correctTranscript, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN, LOANWORDS_BG, BRANDS,
+} from "../lib/vocabulary";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -184,8 +186,10 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     // A word the user put back is removed from the correction target list, so
     // the app cannot keep making a correction they have already rejected.
     const kept = new Set(personal.keep);
-    const vocabulary = [...personal.use, ...PLACES_BG, ...TERMS, ...ADDRESS_BG, ...ADDRESS_EN]
-      .filter(w => !kept.has(w.toLowerCase()));
+    const vocabulary = [
+      ...personal.use, ...PLACES_BG, ...TERMS,
+      ...ADDRESS_BG, ...ADDRESS_EN, ...LOANWORDS_BG, ...BRANDS,
+    ].filter(w => !kept.has(w.toLowerCase()));
 
     // The prompt gets the personal words only. It is capped at roughly 224
     // tokens, so spending it on a fixed list would crowd out the names that
@@ -313,9 +317,11 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
       tool_choice: { type: "tool", name: "categorize_texts" },
       system: `You are a personal journaling assistant. Classify each snippet into exactly one category:
 - journal: personal reflections, feelings, daily thoughts, observations, general activities, weather, social events, and anything not better captured below — this is the default for everyday narrative
-- task: action items, reminders, things the user needs to do (call, buy, schedule, remember to, must, should)
+- task: something NOT YET DONE that the user needs to do (call, buy, schedule, remember to, must, should)
 - idea: creative thoughts, concepts, what-if proposals, something to build, explore, or try
-- log: ONLY body / health / physical tracking — workouts, sleep, eating, physical symptoms, pain, medication, weight, heart rate; do NOT use log for general activities like "went to a store" or "spent time outside"`,
+- log: ONLY body / health / physical tracking — workouts, sleep, eating, physical symptoms, pain, medication, weight, heart rate; do NOT use log for general activities like "went to a store" or "spent time outside"
+
+TENSE IS DECISIVE between journal and task. A task has not happened yet. "I sorted out the support ticket and opened a case" is journal — it is done, the user is recounting it. "I need to prepare the tea before we leave" is a task — it is still ahead of them. Past tense is never a task however action-like the verbs are; a completed action recounted is the diary.`,
       messages: [
         {
           role: "user",
@@ -521,22 +527,29 @@ router.post("/ai/split", aiQuota, async (req, res) => {
         },
       ],
       tool_choice: { type: "tool", name: "return_thought_units" },
-      system: `You are processing a personal diary / journal capture. Segment it by TRAIN OF THOUGHT — NOT by sentence.
+      system: `You are processing a personal diary capture. Decide whether it needs splitting at all, and split only where it genuinely helps.
 
-Rules for segmentation:
-- Consecutive statements elaborating the SAME subject stay together as ONE unit.
-- A genuine TOPIC CHANGE starts a new unit.
-- Spoken filler ("you know", "hmm", "okay so", "like", "I mean") and false starts are NOT topic changes — remove them from the output text.
-- Add sentence-ending punctuation where naturally missing, but NEVER invent, summarise, or drop any of the user's substantive meaning. Every substantive part of the original must appear in exactly one unit.
-- A capture may legitimately be a SINGLE thought — in that case return exactly one unit.
+DEFAULT TO ONE UNIT. Most captures are one entry. Splitting is the exception, not the goal, and returning one unit is a correct and common answer.
 
-Category definitions (assign exactly one per unit):
-- journal: thoughts, feelings, reflections, things that happened, general observations
-- task: something the user needs to do or follow up on (signals: "tomorrow", "need to", "should", "want to" + a concrete action planned)
-- idea: a concept, plan, or possibility the user is exploring or thinking about building/creating
-- log: body, health, workouts, sleep, food, physical sensations ONLY — NOT general daily narration
+The only reason to split is that a part needs to LIVE SOMEWHERE ELSE to be useful later. Ask of each candidate piece: "would the user need to find this on its own, away from the story around it?"
+- A thing they must DO belongs in their task list, where they will look for it. Split it out.
+- A workout or health note belongs in their log, where it can be tracked over time. Split it out.
+- An idea they want to develop belongs with their ideas. Split it out.
+- Everything else is the diary entry. It stays whole.
 
-People: extract person names genuinely mentioned in each unit. Return them exactly as they appear in the text.`,
+A chronological account of a day is ONE journal entry, however many activities it contains. Going to the city, training, working on something, meeting friends, changing plans — that is one person describing one day, not five entries. Do NOT split a narrative into its events. Do NOT give an opening line like "Today was a nice day" its own unit; it is the beginning of the story, not a separate thought.
+
+TENSE IS DECISIVE for tasks. A task is something NOT YET DONE. "I sorted out the support ticket" is the diary — it already happened. "I need to prepare the tea before we leave" is a task — it has not happened. Past tense is never a task, no matter how action-like the words are.
+
+Spoken filler ("you know", "hmm", "okay so", "like", "I mean") and false starts are not topic changes — remove them from the output text. Add sentence-ending punctuation where it is naturally missing. Never invent, summarise, or drop any of the user's substantive meaning: every substantive part of the original must appear in exactly one unit, in the user's own words and language.
+
+Categories:
+- journal: thoughts, feelings, reflections, things that happened, the account of a day. THE DEFAULT.
+- task: something not yet done that the user needs to do. Future or intended, never past.
+- idea: a concept or possibility they are exploring or want to build.
+- log: body, health, workouts, sleep, food, physical sensations ONLY — not general daily narration.
+
+People: extract the human beings named in each unit, exactly as written. Shops, apps, brands, companies and places are NOT people — Temu, Trello, Sofia are not names to return.`,
       messages: [{ role: "user", content: clean }],
     });
 

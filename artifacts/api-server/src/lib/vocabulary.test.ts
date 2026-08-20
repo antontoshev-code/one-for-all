@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { correctTranscript, editDistance, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN } from "./vocabulary.ts";
+import {
+  correctTranscript, editDistance, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN, LOANWORDS_BG, BRANDS,
+} from "./vocabulary.ts";
 
 describe("editDistance", () => {
   test("counts single-character edits", () => {
@@ -98,6 +100,31 @@ describe("correctTranscript", () => {
     assert.equal(r.text, "Дали вуйчо ще се чувства окей");
   });
 
+  test("repairs a loanword carrying a definite article", () => {
+    // Said "съпорта", heard "саппорта". Bulgarian attaches its article to the
+    // word, so the comparison has to happen on the stem and the article be
+    // given back afterwards.
+    const r = correctTranscript("Справих се с саппорта", LOANWORDS_BG);
+    assert.equal(r.text, "Справих се с съпорта");
+  });
+
+  test("repairs a loanword without an article", () => {
+    const r = correctTranscript("отворихме един тикед", LOANWORDS_BG);
+    assert.equal(r.text, "отворихме един тикет");
+  });
+
+  test("does not mangle a word that is already right", () => {
+    const r = correctTranscript("Справих се с съпорта и тикета", LOANWORDS_BG);
+    assert.deepEqual(r.corrections, []);
+  });
+
+  test("requires the first letter to match", () => {
+    // Without this the generous distance budget would start rewriting
+    // unrelated words into vocabulary.
+    const r = correctTranscript("направихме лимонада", ["димоната"]);
+    assert.deepEqual(r.corrections, []);
+  });
+
   test("ships usable seed lists", () => {
     assert.ok(PLACES_BG.includes("София"));
     assert.ok(PLACES_BG.includes("Столична община"));
@@ -106,5 +133,8 @@ describe("correctTranscript", () => {
     assert.ok(ADDRESS_BG.includes("вуйчо"));
     assert.ok(ADDRESS_BG.includes("чичо"));
     assert.ok(ADDRESS_EN.includes("uncle"));
+    assert.ok(LOANWORDS_BG.includes("съпорт"));
+    assert.ok(LOANWORDS_BG.includes("доставка"));
+    assert.ok(BRANDS.includes("Тему"));
   });
 });

@@ -3,25 +3,54 @@
 // Log = SPECIFICALLY body / health / physical tracking.
 // General "I did things today" entries default to Journal.
 
-export function categorizeContent(text: string): 'journal' | 'task' | 'idea' | 'log' {
+/** The four places a capture can end up. */
+export type Category = 'journal' | 'task' | 'idea' | 'log';
+
+export function categorizeContent(text: string): Category {
   const t = text.toLowerCase();
 
+  /**
+   * Task words in both languages the app supports.
+   *
+   * The Bulgarian half was missing entirely, so "За утре имам задача да
+   * подготвя чая" read as an ordinary diary sentence and every Bulgarian
+   * capture came out as one undifferentiated journal entry.
+   *
+   * Bulgarian marks intention with the particle "ще" and with "трябва"/"имам
+   * задача" rather than with an auxiliary verb, and "утре"/"довечера" carry the
+   * future as reliably as "tomorrow" does. What they have in common is that
+   * none of them describe something already done — which is the actual test for
+   * a task.
+   */
   const taskWords = [
+    // English
     "need to", "remind", "todo", "must", "should", "don't forget",
-    "remember to", "have to", "call", "email", "schedule", "meet",
+    "remember to", "have to", "call", "email", "schedule",
     "pick up", "buy", "check",
+    // Bulgarian
+    "трябва", "имам задача", "задача да", "не забравя", "да не забравя",
+    "напомни", "напомняне", "ще трябва", "предстои", "остава да",
+    "да звънна", "да се обадя", "да купя", "да взема", "да напиша",
+    "да изпратя", "да проверя", "да подготвя", "да организирам",
+    "за утре", "довечера трябва", "следващата седмица трябва",
   ];
   if (taskWords.some(w => t.includes(w))) return 'task';
 
   const ideaWords = [
+    // English
     "idea", "what if", "concept", "maybe we could", "what about",
     "thinking about building", "could be interesting", "perhaps",
     "i want to", "i think i want",
+    // Bulgarian
+    "идея", "хрумна ми", "какво ако", "би било", "може би трябва да направим",
+    "мисля да направя", "искам да направя", "би било интересно",
+    "какво ще стане ако", "представям си",
   ];
   if (ideaWords.some(w => t.includes(w))) return 'idea';
 
   // Log = body / health / physical tracking only
   const logWords = [
+    // English
     "workout", "worked out", "exercise", "exercised", "training",
     "ran ", "running", "jogged", "jogging", "sprinted", "cycling", "swam", "swimming",
     "lifted", "gym", "pull-up", "push-up", "bench press", "squat", "deadlift", "reps",
@@ -31,9 +60,27 @@ export function categorizeContent(text: string): 'journal' | 'task' | 'idea' | '
     "heart rate", "pulse", "blood pressure", "steps taken",
     "headache", "stomachache", "pain", "sore", "ache", "symptom", "sick", "fever", "nausea",
     "medication", "vitamins", "supplements",
-    "physical", "health", "body", "muscle",
+    "physical", "health", "body", "muscle", "felt great", "felt tired", "energy",
+    // Bulgarian
+    "тренирах", "тренировка", "тренирам", "фитнес", "бягах", "бягане",
+    "плувах", "колело", "лицеви", "коремни", "клекове", "набирания",
+    "щанга", "серии", "повторения", "разтягане", "кардио",
+    "спах", "сън", "не спах", "събудих се", "умора", "изтощен",
+    "закуска", "обяд", "вечеря", "хранене", "калории", "тегло",
+    "главоболие", "болка", "боли ме", "схванат", "температура", "болен",
+    "лекарство", "витамини", "добавки", "пулс", "кръвно", "енергия", "чувствам се",
   ];
-  if (logWords.some(w => t.includes(w))) return 'log';
+  /**
+   * Log needs the sentence to be ABOUT the body, not merely to mention it.
+   *
+   * "Слязох до София с колата и там тренирах" is a line of narrative that
+   * happens to contain a training verb, and calling it a workout log split a
+   * day's diary entry in half. One keyword inside a long sentence is a passing
+   * mention; two, or one in a short sentence, is the subject.
+   */
+  const logHits = logWords.filter(w => t.includes(w)).length;
+  const wordCount = t.split(/\s+/).filter(Boolean).length;
+  if (logHits >= 2 || (logHits === 1 && wordCount <= 6)) return 'log';
 
   return 'journal';
 }
@@ -83,6 +130,76 @@ export function splitIntoChunks(text: string): string[] {
  * but are NEVER personal names. Prefer false-negatives (missing a real name)
  * over false-positives (flagging a common word as a person).
  */
+/**
+ * Shops, apps and services, which are not people.
+ *
+ * "Очаквах доставка от Тему" offered Тему as somebody to add. A brand read as
+ * a person is worse than most mistakes this detector makes, because People is
+ * where the app keeps notes about human beings, and a shop has no business
+ * sitting among them.
+ */
+const BRAND_WORDS = new Set([
+  "Temu", "Тему", "Amazon", "Амазон", "Ebay", "EBay", "AliExpress", "Али",
+  "Emag", "EMag", "Емаг", "Glovo", "Глово", "Wolt", "Волт", "Uber", "Убер",
+  "Bolt", "Болт", "Netflix", "Нетфликс", "Spotify", "Спотифай",
+  "Youtube", "YouTube", "Ютуб", "Instagram", "Инстаграм", "Facebook", "Фейсбук",
+  "Tiktok", "TikTok", "Тикток", "Whatsapp", "WhatsApp", "Viber", "Вайбър",
+  "Telegram", "Телеграм", "Gmail", "Google", "Гугъл", "Apple", "Епъл",
+  "Microsoft", "Майкрософт", "Revolut", "Револют", "Paypal", "PayPal", "Пейпал",
+  "Booking", "Airbnb", "Kaufland", "Кауфланд", "Lidl", "Лидл", "Billa", "Била",
+  "Fantastico", "Фантастико", "Технополис", "Jumbo", "Джъмбо", "Практикер",
+  "Trello", "Трело", "Notion", "Slack", "Слак", "Figma", "Фигма", "Github",
+  "GitHub", "Zoom", "Зуум", "Teams", "Replit", "Реплит",
+]);
+
+/**
+ * Sentences grouped into units, splitting only where the category changes.
+ *
+ * Plain sentence splitting turned one evening's diary entry into eight pieces —
+ * "Днес беше доста приятен ден." got a card of its own. An account of a day is
+ * one entry however many things happened in it, and the reason to separate a
+ * part is that it belongs somewhere else: a task in the task list, a workout in
+ * the log.
+ *
+ * So adjacent sentences of the same category stay together, and a boundary only
+ * appears where the category changes. That is the same rule the AI splitter is
+ * asked to follow, which matters because this runs when the AI is unavailable
+ * and the two should not disagree about what a capture is.
+ */
+export function groupIntoUnits(text: string): { text: string; category: Category }[] {
+  const sentences = splitIntoChunks(text);
+  if (sentences.length <= 1) {
+    return [{ text: text.trim(), category: categorizeContent(text) }];
+  }
+
+  const units: { text: string; category: Category }[] = [];
+
+  for (const sentence of sentences) {
+    const category = categorizeContent(sentence);
+    const last = units[units.length - 1];
+
+    if (last && last.category === category) {
+      last.text = `${last.text} ${sentence}`.trim();
+    } else {
+      units.push({ text: sentence, category });
+    }
+  }
+
+  return units;
+}
+
+/**
+ * Whether a capture is worth offering to split.
+ *
+ * Not simply "more than one sentence" — by that measure almost every capture is
+ * multi-part, and the Split button would be promoted over Accept on a diary
+ * entry that should stay whole. The question is whether some part of it belongs
+ * in a different place, which is exactly what more than one category means.
+ */
+export function looksWorthSplitting(text: string): boolean {
+  return groupIntoUnits(text).length > 1;
+}
+
 /**
  * Terms of address — обращения — which name a relationship, not a person.
  *
@@ -314,6 +431,8 @@ export function detectNamesInChunk(
     if (PLACE_WORDS.has(candidate)) continue;
     // "Вуйчо" means uncle, not somebody called Вуйчо.
     if (ADDRESS_WORDS.has(candidate)) continue;
+    // "Тему" is a shop. People is for people.
+    if (BRAND_WORDS.has(candidate)) continue;
     if (candidate.length < 4) continue;
 
     seen.add(key);

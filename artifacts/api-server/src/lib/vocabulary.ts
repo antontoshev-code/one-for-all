@@ -38,25 +38,58 @@ export function editDistance(a: string, b: string, max: number): number {
 /**
  * How far a word may be from a known one and still count as the same word.
  *
- * Length alone was the wrong measure: it ruled out anything under five
- * characters, and "Пети" — the exact failure this exists for — is four.
+ * Paired with the first-letter rule below, which does most of the work.
+ * Transcription mangles the middle and end of a word and almost never the
+ * opening sound, so requiring the first letter to match rejects unrelated words
+ * outright and leaves room to be generous about the rest.
  *
- * Capitalisation carries the missing signal. A capitalised word mid-sentence is
- * already claiming to be a proper noun, which is all this corrects, so a short
- * one can be trusted with an edit that a short ordinary word cannot. Long words
- * get a budget regardless of case, because by seven characters an accidental
- * collision with a real word is vanishingly unlikely.
+ * Generosity is needed. "саппорта" for "съпорт" is two edits after the article
+ * is accounted for, and an earlier version capped seven-character words at one
+ * edit and so repaired nothing that mattered.
  */
 function budgetFor(word: string): number {
-  if (word.length >= 10) return 2;
-  if (word.length >= 7) return 1;
+  if (word.length >= 7) return Math.max(1, Math.floor(word.length / 3));
 
+  // Five characters is enough to be a real word rather than a coincidence, and
+  // the first-letter rule already rejects unrelated candidates — "тикед" would
+  // otherwise never reach "тикет".
+  if (word.length >= 5) return 1;
+
+  // At four, only a capitalised word earns an edit: it is already claiming to
+  // be a proper noun. A short lowercase word gets none, because at that length
+  // half the language is one edit from something else.
   const capitalised = word[0] !== word[0].toLowerCase();
-  if (word.length >= 4 && capitalised) return 1;
+  if (word.length === 4 && capitalised) return 1;
 
-  // Three characters or fewer, or short and lowercase: almost every word is one
-  // edit from another, and "Ана" would start rewriting itself into "Иван".
   return 0;
+}
+
+/**
+ * Bulgarian definite articles, which attach to the end of a word.
+ *
+ * The vocabulary lists base forms, but people speak inflected ones —
+ * "съпорта", not "съпорт". Without stripping these, every article-bearing word
+ * looks two or three edits away from its own dictionary form and goes
+ * uncorrected. Longest first, so "съпортът" loses "ът" rather than "т".
+ */
+const BG_ARTICLES = ["ият", "ъят", "ята", "ето", "ите", "ът", "ят", "та", "то", "те", "а", "я", "ъ"];
+
+/**
+ * Every plausible stem of a word, given Bulgarian's definite articles.
+ *
+ * One guess is not enough: "саппорта" ends in both "а" and "та", and taking the
+ * longer match gives "саппор", which has eaten part of the stem. Which is
+ * correct depends on the lemma, which is exactly what is not known yet — so all
+ * candidates are produced and the one that finds a match wins.
+ */
+function articleStems(word: string): string[] {
+  const stems: string[] = [];
+  for (const article of BG_ARTICLES) {
+    if (word.length > article.length + 2 && word.endsWith(article)) {
+      stems.push(word.slice(0, -article.length));
+    }
+  }
+  return stems;
 }
 
 /**
@@ -104,45 +137,78 @@ export interface CorrectionResult {
  * editing a diary.
  */
 export function correctTranscript(text: string, vocabulary: string[]): CorrectionResult {
-  const known = vocabulary.map(w => w.trim()).filter(Boolean);
+  const known = vocabulary.map(w => w.trim()).filter(Boolean).filter(w => !w.includes(" "));
   if (known.length === 0 || !text) return { text, corrections: [] };
 
-  const knownLower = new Set(known.map(w => w.toLowerCase()));
+  const knownLower = new Set(vocabulary.map(w => w.trim().toLowerCase()));
   const corrections: { from: string; to: string }[] = [];
 
-  // Split on word characters so punctuation and spacing survive untouched.
-  const corrected = text.replace(/\p{L}+/gu, token => {
+  /**
+   * The single closest known word, or null when nothing is close enough or two
+   * candidates tie. A tie is a coin flip, and a coin flip has no business
+   * editing a diary.
+   */
+  const closest = (token: string): string | null => {
     const lower = token.toLowerCase();
-    if (knownLower.has(lower)) return token;
-
     const budget = budgetFor(token);
-    if (budget === 0) return token;
+    if (budget === 0) return null;
 
     let best: string | null = null;
     let bestDistance = budget + 1;
     let tied = false;
 
     for (const word of known) {
-      // Only compare against single words; multi-word entries like "Стара
-      // Загора" cannot match a single token and would only add noise.
-      if (word.includes(" ")) continue;
+      const candidate = word.toLowerCase();
+      // Transcription mangles the middle and end of a word, almost never the
+      // opening sound. Requiring it to match rejects unrelated words outright.
+      if (candidate[0] !== lower[0]) continue;
 
-      const distance = editDistance(lower, word.toLowerCase(), budget);
+      const distance = editDistance(lower, candidate, budget);
       if (distance > budget) continue;
 
       if (distance < bestDistance) {
         best = word;
         bestDistance = distance;
         tied = false;
-      } else if (distance === bestDistance && word.toLowerCase() !== best?.toLowerCase()) {
+      } else if (distance === bestDistance && candidate !== best?.toLowerCase()) {
         tied = true;
       }
     }
 
-    if (!best || tied) return token;
+    return tied ? null : best;
+  };
 
-    corrections.push({ from: token, to: best });
-    return best;
+  // Split on word characters so punctuation and spacing survive untouched.
+  const corrected = text.replace(/\p{L}+/gu, token => {
+    const lower = token.toLowerCase();
+    if (knownLower.has(lower)) return token;
+
+    const stems = articleStems(token);
+
+    // An inflected form of a word already in the vocabulary is correct as it
+    // stands. Without this check, "съпорта" gets "corrected" to "съпорт" —
+    // stripping the article off a word that was right all along.
+    if (stems.some(stem => knownLower.has(stem.toLowerCase()))) return token;
+
+    const direct = closest(token);
+    if (direct) {
+      corrections.push({ from: token, to: direct });
+      return direct;
+    }
+
+    // Bulgarian attaches its definite article to the end of the word, so
+    // "саппорта" has to be compared as "саппорт" and then given its article
+    // back. Without this every inflected word sits an extra edit or two from
+    // its own dictionary form and nothing is ever repaired.
+    for (const stem of stems) {
+      const match = closest(stem);
+      if (!match) continue;
+      const rebuilt = match + token.slice(stem.length);
+      corrections.push({ from: token, to: rebuilt });
+      return rebuilt;
+    }
+
+    return token;
   });
 
   return { text: corrected, corrections };
@@ -195,4 +261,62 @@ export const ADDRESS_EN = [
   "godmother", "godfather", "godson", "goddaughter",
   "boss", "colleague", "neighbour", "neighbor", "mate", "buddy", "flatmate",
   "roommate", "landlord", "landlady",
+];
+
+/**
+ * Чуждици — loanwords Bulgarian has absorbed and spells its own way.
+ *
+ * These break transcription in a particular way: the word is English, so the
+ * model reaches for an English spelling or an invented Bulgarian one, and the
+ * result is a word nobody writes. "саппорта" for "съпорта" is the shape of it —
+ * recognisably the right word, spelled as nothing at all.
+ *
+ * They are unavoidable in a Bulgarian diary because they are simply how people
+ * speak: nobody says "поддръжка" when they mean support, or "приложение" when
+ * they mean the app on their phone.
+ */
+export const LOANWORDS_BG = [
+  // Work and software, where the borrowing is heaviest
+  "съпорт", "тикет", "имейл", "мейл", "линк", "файл", "бекъп", "ъпдейт",
+  "ъпгрейд", "даунлоуд", "ъплоуд", "лаптоп", "десктоп", "сървър", "браузър",
+  "акаунт", "профил", "чат", "пост", "лайк", "скрийншот", "апликация",
+  "софтуер", "хардуер", "бъг", "фийчър", "деплой", "билд", "код", "дизайн",
+  "интерфейс", "юзър", "клиент", "мениджър", "мениджмънт", "маркетинг",
+  "бранд", "брандинг", "стартъп", "инвеститор", "презентация", "митинг",
+  "дедлайн", "репорт", "фийдбек", "брейнсторм", "уъркшоп", "тиймбилдинг",
+  "онбординг", "аутсорсинг", "фрийланс", "ремоут", "офис", "рисърч",
+  "пароли", "парола", "линкове", "апдейт", "нотификация", "абонамент",
+
+  // Shopping and delivery
+  "доставка", "доставчик", "куриер", "пратка", "поръчка", "онлайн",
+  "оферта", "ваучер", "промоция", "дисконт", "кеш", "транзакция", "превод",
+  "рефънд", "рекламация", "гаранция", "касова", "банкомат",
+
+  // Getting about and going out
+  "паркинг", "асансьор", "супермаркет", "мол", "ресторант", "меню",
+  "резервация", "билет", "трамвай", "тролей", "метро", "автобус", "такси",
+  "летище", "хотел", "апартамент", "тераса", "гараж", "бариера",
+
+  // Training, which lands in the log category
+  "тренировка", "тренирах", "фитнес", "кардио", "стречинг", "серия",
+  "повторения", "лицеви", "коремни", "клек", "набирания", "щанга", "дъмбел",
+  "протеин", "креатин", "бургер", "смути", "шейк",
+];
+
+/**
+ * Shops, apps and services that appear in a diary and are not people.
+ *
+ * "Очаквах доставка от Тему" offered Тему as somebody to add. A brand read as
+ * a person is worse than most mistakes here, because People is where the app
+ * keeps notes about human beings and a shop does not belong among them.
+ */
+export const BRANDS = [
+  "Temu", "Тему", "Amazon", "Амазон", "eBay", "Ebay", "AliExpress",
+  "Emag", "eMag", "Глово", "Glovo", "Wolt", "Волт", "Uber", "Убер", "Bolt",
+  "Netflix", "Спотифай", "Spotify", "YouTube", "Ютуб", "Instagram", "Инстаграм",
+  "Facebook", "Фейсбук", "TikTok", "Тикток", "WhatsApp", "Вайбър", "Viber",
+  "Telegram", "Телеграм", "Gmail", "Google", "Гугъл", "Apple", "Епъл",
+  "Microsoft", "Майкрософт", "Revolut", "Револют", "PayPal", "Пейпал",
+  "Booking", "Airbnb", "Kaufland", "Кауфланд", "Lidl", "Лидл", "Billa", "Била",
+  "Fantastico", "Фантастико", "DM", "Технополис", "Емаг", "Джъмбо", "Jumbo",
 ];

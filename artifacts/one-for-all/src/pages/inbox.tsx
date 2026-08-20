@@ -28,6 +28,8 @@ import { formatDate } from "@/lib/utils";
 import {
   categorizeContent,
   splitIntoChunks,
+  groupIntoUnits,
+  looksWorthSplitting,
   detectNamesInChunk,
   type NameDetectionResult,
 } from "@/lib/heuristics";
@@ -201,7 +203,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
    * render and must be instant and free — the real split still asks Claude
    * once the user commits to it.
    */
-  const looksMultiPart = splitIntoChunks(entry.content ?? "").length > 1;
+  const looksMultiPart = looksWorthSplitting(entry.content ?? "");
 
   /**
    * Editing the capture text here, not only at the moment of recording.
@@ -360,12 +362,14 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     setIsSplitLoading(true);
 
     const makeFallbackPieces = () => {
-      const chunks = splitIntoChunks(entry.content);
-      return chunks.map(text => ({
-        text,
-        category: categorizeContent(text),
+      // Grouped, not one card per sentence. A day's account is one entry
+      // however many things happened in it; the reason to separate a part is
+      // that it belongs somewhere else.
+      return groupIntoUnits(entry.content).map(unit => ({
+        text: unit.text,
+        category: unit.category,
         accepted: true,
-        names: asPieceNames(detectNamesInChunk(text, people || [])),
+        names: asPieceNames(detectNamesInChunk(unit.text, people || [])),
       }));
     };
 
