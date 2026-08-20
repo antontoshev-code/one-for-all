@@ -84,6 +84,51 @@ export function splitIntoChunks(text: string): string[] {
  * over false-positives (flagging a common word as a person).
  */
 /**
+ * Places, which are capitalised exactly like people and are not people.
+ *
+ * "разходка до Италия с Елена" offered Италия as a person to add. The detector
+ * works on "capitalised word mid-sentence", and a country satisfies that as
+ * well as a name does — nothing in the shape of the word distinguishes them, so
+ * they have to be listed.
+ *
+ * Countries first: a diary talks about travelling far more often than it names
+ * a city, and a wrongly offered country is the one a user will hit first.
+ */
+const PLACE_WORDS = new Set([
+  // ── Countries, Bulgarian ────────────────────────────────────────────────
+  "България", "Италия", "Германия", "Франция", "Испания", "Гърция", "Турция",
+  "Румъния", "Сърбия", "Македония", "Албания", "Хърватия", "Словения",
+  "Австрия", "Швейцария", "Белгия", "Холандия", "Нидерландия", "Дания",
+  "Швеция", "Норвегия", "Финландия", "Полша", "Чехия", "Словакия", "Унгария",
+  "Украйна", "Русия", "Англия", "Ирландия", "Шотландия", "Португалия",
+  "Америка", "Канада", "Мексико", "Бразилия", "Аржентина", "Египет", "Мароко",
+  "Япония", "Китай", "Индия", "Тайланд", "Виетнам", "Австралия",
+  "Кипър", "Малта", "Исландия", "Естония", "Латвия", "Литва", "Грузия",
+
+  // ── Cities and regions, Bulgarian ───────────────────────────────────────
+  "София", "Пловдив", "Варна", "Бургас", "Русе", "Плевен", "Сливен", "Добрич",
+  "Шумен", "Перник", "Хасково", "Ямбол", "Пазарджик", "Благоевград", "Враца",
+  "Габрово", "Асеновград", "Видин", "Казанлък", "Кюстендил", "Кърджали",
+  "Монтана", "Димитровград", "Търговище", "Ловеч", "Силистра", "Разград",
+  "Дупница", "Смолян", "Петрич", "Самоков", "Сандански", "Свищов", "Несебър",
+  "Созопол", "Банско", "Боровец", "Витоша", "Рила", "Пирин", "Родопи",
+  "Дунав", "Люлин", "Младост", "Лозенец", "Столична",
+  "Берлин", "Париж", "Лондон", "Рим", "Милано", "Виена", "Прага", "Атина",
+  "Истанбул", "Мадрид", "Барселона", "Амстердам", "Брюксел", "Будапеща",
+
+  // ── English ─────────────────────────────────────────────────────────────
+  "Bulgaria", "Italy", "Germany", "France", "Spain", "Greece", "Turkey",
+  "Romania", "Serbia", "Austria", "Switzerland", "Belgium", "Netherlands",
+  "Denmark", "Sweden", "Norway", "Finland", "Poland", "Czechia", "Hungary",
+  "Ukraine", "Russia", "England", "Ireland", "Scotland", "Portugal",
+  "America", "Canada", "Mexico", "Brazil", "Egypt", "Morocco", "Japan",
+  "China", "India", "Thailand", "Vietnam", "Australia", "Europe",
+  "Sofia", "Plovdiv", "Varna", "Burgas", "Berlin", "Paris", "London", "Rome",
+  "Milan", "Vienna", "Prague", "Athens", "Istanbul", "Madrid", "Barcelona",
+  "Amsterdam", "Brussels", "Budapest", "Lisbon", "Dublin", "Edinburgh",
+]);
+
+/**
  * Words that look like names but aren't.
  *
  * Both languages the app is used in are listed, because the detector works on
@@ -227,6 +272,9 @@ export function detectNamesInChunk(
     // sentence, because the match itself is the evidence there.
     if (isSentenceInitial(chunk, match.index ?? 0)) continue;
     if (NON_NAME_WORDS.has(candidate)) continue;
+    // A country reads exactly like a name to this detector. "разходка до
+    // Италия с Елена" offered Италия as a person to add.
+    if (PLACE_WORDS.has(candidate)) continue;
     if (candidate.length < 4) continue;
 
     seen.add(key);

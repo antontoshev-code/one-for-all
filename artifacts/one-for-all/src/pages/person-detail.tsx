@@ -117,14 +117,26 @@ function AliasEditor({
     }
   };
 
-  const add = () => {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    // Case-insensitive check so "petja" doesn't get added next to "Petja".
-    const exists = aliases.some(a => a.toLocaleLowerCase() === trimmed.toLocaleLowerCase());
-    if (exists) { setDraft(""); return; }
-    commit([...aliases, trimmed]);
+  /** Add several spellings at once, skipping any already present. */
+  const addMany = (incoming: string[]) => {
+    const seen = new Set(aliases.map(a => a.toLocaleLowerCase()));
+    const fresh: string[] = [];
+
+    for (const raw of incoming) {
+      const trimmed = raw.trim();
+      if (!trimmed) continue;
+      // Case-insensitive, so "petja" isn't added next to "Petja".
+      const key = trimmed.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      fresh.push(trimmed);
+    }
+
+    setDraft("");
+    if (fresh.length > 0) commit([...aliases, ...fresh]);
   };
+
+  const add = () => addMany([draft]);
 
   return (
     <div>
@@ -163,8 +175,25 @@ function AliasEditor({
         <Input
           value={draft}
           onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter") add(); }}
-          placeholder="Add a spelling, e.g. Petja or Петя"
+          onKeyDown={e => {
+            // A comma commits too. Listing spellings is naturally a
+            // comma-separated act — "Петя, Petya, Pepi" — and making people
+            // reach for Enter between each one is friction with no purpose.
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          onPaste={e => {
+            // Pasting a comma-separated list adds each spelling rather than
+            // creating one alias containing commas.
+            const pasted = e.clipboardData.getData("text");
+            if (!pasted.includes(",")) return;
+            e.preventDefault();
+            const parts = pasted.split(",").map(x => x.trim()).filter(Boolean);
+            if (parts.length > 0) addMany(parts);
+          }}
+          placeholder="Add spellings, e.g. Петя, Petya, Pepi"
           className="h-9 text-sm bg-background"
         />
         <Button

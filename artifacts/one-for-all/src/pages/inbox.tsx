@@ -15,13 +15,14 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2, Check, X, UserPlus, Scissors, ChevronLeft,
-  UserCheck, AlertCircle, Trash2,
+  UserCheck, AlertCircle, Trash2, Pencil,
 } from "lucide-react";
 import { logEvent } from "@/lib/analytics";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatDate } from "@/lib/utils";
 import {
@@ -201,6 +202,46 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
    * once the user commits to it.
    */
   const looksMultiPart = splitIntoChunks(entry.content ?? "").length > 1;
+
+  /**
+   * Editing the capture text here, not only at the moment of recording.
+   *
+   * Transcription mistakes are usually noticed later — reading it back in the
+   * Inbox, not in the two seconds after speaking. Until now the text was fixed
+   * once it left the Home screen, so a mis-heard name could never be corrected
+   * and, worse, could never teach the app anything. Fixing it here feeds the
+   * same learning path as fixing it there.
+   */
+  const [isEditingText, setIsEditingText] = useState(false);
+  const [draftText, setDraftText] = useState(entry.content ?? "");
+  const [isSavingText, setIsSavingText] = useState(false);
+
+  const saveText = async () => {
+    const next = draftText.trim();
+    const original = entry.content ?? "";
+    if (!next || next === original) { setIsEditingText(false); return; }
+
+    setIsSavingText(true);
+    try {
+      await updateEntry.mutateAsync({ id: entry.id, data: { content: next } });
+
+      // Same signal as an edit made at capture time: the person who was there
+      // telling us what was actually said. Fire-and-forget — improving future
+      // transcription must never risk the correction itself.
+      fetch("/api/vocabulary/learn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ original, edited: next }),
+      }).catch(err => console.warn("[vocabulary] learn failed", err));
+
+      invalidateAll();
+      setIsEditingText(false);
+    } catch (err) {
+      console.error("Failed to save capture text", err);
+    } finally {
+      setIsSavingText(false);
+    }
+  };
 
   useEffect(() => {
     if (!entry.content) return;
@@ -548,7 +589,44 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         </span>
       </div>
 
-      <p className="text-foreground text-lg leading-relaxed mb-6">{entry.content}</p>
+      {isEditingText ? (
+        <div className="mb-6 flex flex-col gap-2">
+          <Textarea
+            value={draftText}
+            onChange={e => setDraftText(e.target.value)}
+            autoFocus
+            rows={5}
+            className="text-lg leading-relaxed rounded-2xl"
+          />
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-full text-xs"
+              onClick={() => { setDraftText(entry.content ?? ""); setIsEditingText(false); }}
+              disabled={isSavingText}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" className="rounded-full text-xs" onClick={saveText} disabled={isSavingText}>
+              {isSavingText && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
+              Save
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-6 flex items-start gap-2">
+          <p className="text-foreground text-lg leading-relaxed flex-1">{entry.content}</p>
+          <button
+            onClick={() => { setDraftText(entry.content ?? ""); setIsEditingText(true); }}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 shrink-0 mt-1"
+            aria-label="Fix the transcription"
+            title="Fix a mis-heard word"
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {isChangingCat ? (
         <div>

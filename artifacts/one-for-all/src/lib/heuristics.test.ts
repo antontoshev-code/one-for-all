@@ -72,6 +72,24 @@ describe("detectNamesInChunk", () => {
     assert.deepEqual(r, []);
   });
 
+  test("does not offer a country as a person", () => {
+    // "разходка до Италия с Елена" offered Италия. A country is capitalised
+    // mid-sentence exactly like a name, so nothing in the word's shape
+    // separates them.
+    const r = detectNamesInChunk("разходка до Италия с Елена", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Елена"]);
+  });
+
+  test("does not offer a city as a person", () => {
+    const r = detectNamesInChunk("бяхме в Пловдив с Петя", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Петя"]);
+  });
+
+  test("does not offer English place names either", () => {
+    const r = detectNamesInChunk("flying to Italy with Sarah", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Sarah"]);
+  });
+
   test("returns nothing for text with no names", () => {
     assert.deepEqual(detectNamesInChunk("went for a run and made lunch", []), []);
   });
