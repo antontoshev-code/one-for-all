@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useListEntries,
   useUpdateEntry,
@@ -15,9 +15,11 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2, Check, X, UserPlus, Scissors, ChevronLeft,
-  UserCheck, AlertCircle,
+  UserCheck, AlertCircle, Trash2,
 } from "lucide-react";
 import { logEvent } from "@/lib/analytics";
+import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -162,6 +164,7 @@ export default function Inbox() {
 function InboxCard({ entry, index }: { entry: any; index: number }) {
   const updateEntry = useUpdateEntry();
   const deleteEntry = useDeleteEntry();
+  const { toast } = useToast();
   const createEntry = useCreateEntry();
   const createPerson = useCreatePerson();
   const linkPerson = useLinkPersonToEntry();
@@ -174,6 +177,21 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   const [localSuggestedCat, setLocalSuggestedCat] = useState<Category | null>(null);
   // Skip state
   const [isSkipped, setIsSkipped] = useState(false);
+
+  /**
+   * Names found in the capture as a whole.
+   *
+   * Name suggestions used to appear only after "Split into pieces", so a
+   * capture accepted as one entry — the common case — offered nobody, and the
+   * only way to record that Elena was mentioned was to remember and use Link
+   * Person by hand. Detection belongs on the path people actually take.
+   */
+  const [captureNames, setCaptureNames] = useState<PieceName[]>([]);
+
+  useEffect(() => {
+    if (!entry.content) return;
+    setCaptureNames(asPieceNames(detectNamesInChunk(entry.content, people || [])));
+  }, [entry.content, people]);
   // Link person popover
   const [personSearch, setPersonSearch] = useState("");
   const [newPersonName, setNewPersonName] = useState("");
@@ -197,7 +215,46 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
   // ── Single-category actions ──────────────────────────────────────────────
 
-  const handleProcess = (category: Category | 'inbox') => {
+  /**
+   * Create and link everyone the user chose, before filing the entry.
+   *
+   * Awaited rather than fire-and-forget: the entry leaves the inbox on success,
+   * so a link that lands afterwards would attach to a card the user can no
+   * longer see to check.
+   */
+  const applyCaptureNames = async () => {
+    for (const name of captureNames) {
+      let personId = name.linkedPersonId;
+
+      if (!personId && name.addAsNew && name.detection.suggestedName) {
+        try {
+          const np = await createPerson.mutateAsync({
+            data: {
+              name: name.detection.suggestedName,
+              ...(name.descriptor ? { descriptor: name.descriptor } : {}),
+            },
+          });
+          personId = np.id;
+          queryClient.invalidateQueries({ queryKey: getListPeopleQueryKey() });
+        } catch (err) {
+          // One name failing must not cost the entry or the other names.
+          console.error("Failed to create person", err);
+        }
+      }
+
+      if (personId) {
+        try {
+          await linkPerson.mutateAsync({ id: entry.id, data: { personId } });
+        } catch (err) {
+          console.error("Failed to link person", err);
+        }
+      }
+    }
+  };
+
+  const handleProcess = async (category: Category | 'inbox') => {
+    await applyCaptureNames();
+
     updateEntry.mutate({ id: entry.id, data: { category } }, {
       onSuccess: () => {
         // Record for History (fire-and-forget — not on critical path)
@@ -510,6 +567,92 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
             </p>
           </div>
 
+          {/* People named in this capture. Same decisions as the split screen,
+              on the path most captures actually take. */}
+          {captureNames.length > 0 && !isSkipped && (
+            <div className="flex flex-col gap-2">
+              {captureNames.map((name, ni) => {
+                const patch = (p: Partial<PieceName>) =>
+                  setCaptureNames(prev => prev.map((n, i) => i === ni ? { ...n, ...p } : n));
+                const { detection } = name;
+
+                if (detection.matchedPerson) {
+                  const linked = name.linkedPersonId === detection.matchedPerson.id;
+                  return (
+                    <div key={ni} className="bg-background/60 rounded-xl px-3 py-2 flex items-center justify-between gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        Link to{' '}
+                        <span className="font-semibold text-foreground">
+                          {detection.matchedPerson.name}
+                          {detection.matchedPerson.descriptor ? ` (${detection.matchedPerson.descriptor})` : ''}
+                        </span>?
+                      </span>
+                      <button
+                        onClick={() => patch({ linkedPersonId: linked ? null : detection.matchedPerson!.id })}
+                        className={`text-xs shrink-0 ${linked ? 'text-muted-foreground' : 'text-primary font-medium'}`}
+                      >
+                        {linked ? 'Remove' : 'Link'}
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (detection.matchedPeople && detection.matchedPeople.length > 1) {
+                  return (
+                    <div key={ni} className="bg-background/60 rounded-xl px-3 py-2">
+                      <p className="text-xs text-muted-foreground mb-1.5">
+                        Mentions <span className="font-semibold text-foreground">{detection.matchedPeople[0].name}</span> — which one?
+                      </p>
+                      <div className="flex flex-col gap-1">
+                        {detection.matchedPeople.map(p => (
+                          <button
+                            key={p.id}
+                            onClick={() => patch({ linkedPersonId: name.linkedPersonId === p.id ? null : p.id })}
+                            className={`text-left text-xs px-2 py-1 rounded-lg ${
+                              name.linkedPersonId === p.id
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-background border border-border/40'
+                            }`}
+                          >
+                            {p.name}{p.descriptor ? ` (${p.descriptor})` : ''}{name.linkedPersonId === p.id && ' ✓'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (detection.suggestedName) {
+                  return (
+                    <div key={ni} className="bg-background/60 rounded-xl px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          Mentions <span className="font-semibold text-foreground">"{detection.suggestedName}"</span> — add as person?
+                        </span>
+                        <button
+                          onClick={() => patch({ addAsNew: !name.addAsNew })}
+                          className={`text-xs shrink-0 ${name.addAsNew ? 'text-muted-foreground' : 'text-primary font-medium'}`}
+                        >
+                          {name.addAsNew ? 'Undo' : 'Add'}
+                        </button>
+                      </div>
+                      {(name.addAsNew || name.descriptor) && (
+                        <Input
+                          placeholder="Short label (optional): 'Studentina', 'climbing gym'…"
+                          value={name.descriptor}
+                          onChange={e => patch({ descriptor: e.target.value, addAsNew: true })}
+                          className="h-7 text-xs rounded-xl mt-2"
+                        />
+                      )}
+                    </div>
+                  );
+                }
+
+                return null;
+              })}
+            </div>
+          )}
+
           {isSkipped ? (
             <div className="flex items-center justify-between px-1">
               <p className="text-sm text-muted-foreground">Skipped — come back later</p>
@@ -563,8 +706,49 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         </div>
       )}
 
-      {/* Link Person */}
-      <div className="mt-4 pt-4 border-t border-border/50 flex justify-end">
+      {/* Link Person, and a way out */}
+      <div className="mt-4 pt-4 border-t border-border/50 flex justify-between items-center">
+        {/* There was no way to throw a capture away. Skip only hides it, so a
+            test recording or a misfire stayed in the inbox for good. Undoable,
+            so it needs no confirmation dialog of its own. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="rounded-full text-muted-foreground hover:text-destructive h-8 text-xs"
+          onClick={async () => {
+            try {
+              await deleteEntry.mutateAsync({ id: entry.id });
+              invalidateAll();
+              toast({
+                title: "Capture deleted",
+                action: (
+                  <ToastAction
+                    altText="Undo"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`/api/entries/${entry.id}/restore`, { method: "POST" });
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        invalidateAll();
+                      } catch (err) {
+                        console.error("Restore failed", err);
+                        toast({ title: "Could not undo", description: "Please try again." });
+                      }
+                    }}
+                  >
+                    Undo
+                  </ToastAction>
+                ),
+              });
+            } catch (err) {
+              console.error("Delete failed", err);
+              toast({ title: "Could not delete", description: "Please try again." });
+            }
+          }}
+        >
+          <Trash2 className="w-3.5 h-3.5 mr-2" />
+          Delete
+        </Button>
+
         <Popover>
           <PopoverTrigger asChild>
             <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground h-8 text-xs">

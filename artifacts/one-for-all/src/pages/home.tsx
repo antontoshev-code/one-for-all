@@ -403,7 +403,7 @@ export default function Home() {
                 {transcriptBadge === "real" && (
                   <div className="flex items-center gap-2 px-4 py-2 bg-secondary/80 text-secondary-foreground rounded-full text-sm self-start">
                     <Sparkles className="w-4 h-4 text-primary" />
-                    <span>Real transcript — edit before saving</span>
+                    <span>Here are your thoughts — check before saving</span>
                   </div>
                 )}
                 {transcriptBadge === "no-speech" && (

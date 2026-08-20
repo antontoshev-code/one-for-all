@@ -149,7 +149,7 @@ describe("voice recording transcription", () => {
     await startAndStopRecording();
 
     expect(await screen.findByDisplayValue("A native speech transcript")).toBeInTheDocument();
-    expect(screen.getByText("Real transcript — edit before saving")).toBeInTheDocument();
+    expect(screen.getByText("Here are your thoughts — check before saving")).toBeInTheDocument();
     expect(recognitionInstances).toHaveLength(1);
     expect(transcribeAudioMock).not.toHaveBeenCalled();
   });
@@ -166,7 +166,7 @@ describe("voice recording transcription", () => {
 
     expect(await screen.findByDisplayValue("A Whisper fallback transcript")).toBeInTheDocument();
     expect(transcribeAudioMock).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Real transcript — edit before saving")).toBeInTheDocument();
+    expect(screen.getByText("Here are your thoughts — check before saving")).toBeInTheDocument();
   });
 
   it("asks the user to type when neither transcription path succeeds", async () => {
