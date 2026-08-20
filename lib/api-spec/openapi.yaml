@@ -14,6 +14,10 @@ tags:
     description: Capture entries (voice or text)
   - name: people
     description: People linked to entries
+  - name: captures
+    description: Original captures and what they were split into
+  - name: data
+    description: Export and erasure
 paths:
   /healthz:
     get:
@@ -291,8 +295,194 @@ paths:
         "204":
           description: Deleted
 
+  # ── Restore ────────────────────────────────────────────────────────────────
+  # Deleting marks a row rather than removing it, so Undo can return the same
+  # entry with its people links intact instead of a copy that merely resembles it.
+  /entries/{id}/restore:
+    post:
+      operationId: restoreEntry
+      tags: [entries]
+      summary: Undo a deleted entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: integer
+        "404":
+          description: No deleted entry with that id belongs to the caller
+
+  /people/{id}/restore:
+    post:
+      operationId: restorePerson
+      tags: [people]
+      summary: Undo a deleted person
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: integer
+        "404":
+          description: No deleted person with that id belongs to the caller
+
+  # ── Captures ───────────────────────────────────────────────────────────────
+  # The original text of a capture, kept whole even after it is split into
+  # separate entries, so the words as spoken are never lost to categorisation.
+  /captures:
+    get:
+      operationId: listCaptures
+      tags: [captures]
+      summary: List past captures with what each became
+      responses:
+        "200":
+          description: Captures, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Capture"
+    post:
+      operationId: createCapture
+      tags: [captures]
+      summary: Record a capture and the entries it produced
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCapture"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Capture"
+
+  # ── Data ───────────────────────────────────────────────────────────────────
+  # Access and erasure. These are the rights the privacy policy promises, so
+  # they are part of the contract rather than an administrative extra.
+  /data/export:
+    get:
+      operationId: exportData
+      tags: [data]
+      summary: Everything belonging to the signed-in user
+      responses:
+        "200":
+          description: Full export
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /data/clear:
+    post:
+      operationId: clearData
+      tags: [data]
+      summary: Delete all content, keeping the account
+      responses:
+        "200":
+          description: Cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /data/account:
+    delete:
+      operationId: deleteAccount
+      tags: [data]
+      summary: Delete the account and everything in it
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+
 components:
   schemas:
+    Capture:
+      type: object
+      required: [id, content, createdAt]
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+          description: The capture exactly as it arrived, before any splitting
+        captureType:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              entryId:
+                type: integer
+              category:
+                type: string
+              content:
+                type: string
+                nullable: true
+              exists:
+                type: boolean
+                description: False once the entry it became has been deleted
+
+    CreateCapture:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        captureType:
+          type: string
+        entries:
+          type: array
+          items:
+            type: object
+            required: [entryId, category]
+            properties:
+              entryId:
+                type: integer
+              category:
+                type: string
+
     HealthStatus:
       type: object
       required: [status]
