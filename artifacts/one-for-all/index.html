@@ -2,17 +2,34 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <!-- viewport-fit=cover so the app reaches under the notch when installed.
+         No maximum-scale: pinch-zoom is how people with poor eyesight read, and
+         taking it away to avoid an input-focus zoom is the wrong trade. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>One for All</title>
-    <meta name="description" content="One for All — built on Replit. Update this description to reflect the app." />
+    <meta name="description" content="One place for every part of you. Capture a thought by voice or text, and let it sort itself out later." />
     <meta name="robots" content="index, follow" />
     <meta property="og:title" content="One for All" />
-    <meta property="og:description" content="One for All — built on Replit. Update this description to reflect the app." />
+    <meta property="og:description" content="One place for every part of you. Capture a thought by voice or text, and let it sort itself out later." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="One for All" />
-    <meta name="twitter:description" content="One for All — built on Replit. Update this description to reflect the app." />
+    <meta name="twitter:description" content="One place for every part of you. Capture a thought by voice or text, and let it sort itself out later." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Installable on a phone: home-screen icon, no browser chrome. The app is
+         used on the move far more than at a desk, and a tab among forty tabs is
+         not where anyone reaches to record a thought. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- iOS ignores SVG here and would screenshot the page instead, which for
+         this app is a blank capture screen. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="One for All" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- Matches the app's own primary and background, so the status bar and the
+         splash screen do not flash a colour the app never uses. -->
+    <meta name="theme-color" content="#81977d" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">

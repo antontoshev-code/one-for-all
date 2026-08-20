@@ -1,0 +1,9 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="112" fill="#81977d"/>
+  <!-- A microphone: the app is voice-first, and the icon should say so at a
+       glance on a home screen full of other icons. -->
+  <rect x="216" y="120" width="80" height="152" rx="40" fill="#fdfcf7"/>
+  <path d="M172 244v20a84 84 0 0 0 168 0v-20" stroke="#fdfcf7" stroke-width="24"
+        stroke-linecap="round" fill="none"/>
+  <path d="M256 348v44" stroke="#fdfcf7" stroke-width="24" stroke-linecap="round"/>
+</svg>
