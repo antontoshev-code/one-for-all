@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
-import { Loader2, Mic, PenLine, AlertCircle, Clock, User } from "lucide-react";
+import { Loader2, Mic, PenLine, AlertCircle, Clock, User, UserPlus, X } from "lucide-react";
+import { useListPeople } from "@workspace/api-client-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 
@@ -25,6 +27,110 @@ interface HistoryCapture {
   captureType: "voice" | "text";
   createdAt: string;
   entries: HistoryEntry[];
+}
+
+
+/**
+ * Add or remove the people linked to one entry, from History.
+ *
+ * There was nowhere to do this once a capture had been processed. Names are
+ * offered while a capture sits in the Inbox and never again, so missing one —
+ * which happens, since detection is deliberately cautious — meant it stayed
+ * missing. History is where you go when you remember, so this is where the fix
+ * belongs.
+ *
+ * Scoped to the single entry rather than the whole capture: a capture split
+ * into a workout and an evening with friends should not attach those friends to
+ * the workout.
+ */
+function EntryPeopleEditor({
+  entryId,
+  people,
+  onChanged,
+}: {
+  entryId: number;
+  people: HistoryPerson[];
+  onChanged: () => void;
+}) {
+  const { data: allPeople } = useListPeople();
+  const [busy, setBusy] = useState(false);
+
+  const linkedIds = new Set(people.map(p => p.id));
+  const available = (allPeople ?? []).filter(p => !linkedIds.has(p.id));
+
+  const call = async (url: string, method: string) => {
+    setBusy(true);
+    try {
+      const res = await fetch(url, { method });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onChanged();
+    } catch (err) {
+      console.error("Failed to update entry people", err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <PopoverContent className="w-64 p-3 rounded-2xl">
+      <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wider">
+        People in this entry
+      </p>
+
+      {people.length === 0 ? (
+        <p className="text-xs text-muted-foreground mb-3">Nobody linked yet.</p>
+      ) : (
+        <div className="flex flex-col gap-1 mb-3">
+          {people.map(person => (
+            <div key={person.id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="truncate">{person.name}</span>
+              <button
+                disabled={busy}
+                onClick={() => call(`/api/entries/${entryId}/people/${person.id}`, "DELETE")}
+                className="text-muted-foreground hover:text-destructive shrink-0 disabled:opacity-50"
+                aria-label={`Remove ${person.name}`}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {available.length > 0 && (
+        <>
+          <p className="text-xs font-semibold mb-1.5 text-muted-foreground uppercase tracking-wider">
+            Add
+          </p>
+          <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
+            {available.map(person => (
+              <button
+                key={person.id}
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  fetch(`/api/entries/${entryId}/people`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ personId: person.id }),
+                  })
+                    .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); onChanged(); })
+                    .catch(err => console.error("Failed to link person", err))
+                    .finally(() => setBusy(false));
+                }}
+                className="text-left text-sm px-2 py-1 rounded-lg hover:bg-secondary transition-colors disabled:opacity-50 truncate"
+              >
+                {person.name}
+                {person.descriptor ? (
+                  <span className="text-muted-foreground"> ({person.descriptor})</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </PopoverContent>
+  );
 }
 
 // ── Category → page route ─────────────────────────────────────────────────
@@ -194,11 +300,31 @@ export default function History() {
                     }
 
                     return (
-                      <Link key={j} href={route}>
-                        <span className={`inline-flex items-center text-xs px-2.5 py-1 rounded-full hover:opacity-80 transition-opacity cursor-pointer ${colourClass}`}>
-                          {label}
-                        </span>
-                      </Link>
+                      <span key={j} className="inline-flex items-center gap-1">
+                        <Link href={route}>
+                          <span className={`inline-flex items-center text-xs px-2.5 py-1 rounded-full hover:opacity-80 transition-opacity cursor-pointer ${colourClass}`}>
+                            {label}
+                          </span>
+                        </Link>
+                        {entry.entryId !== null && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-full"
+                                aria-label={`Edit people in this ${entry.category} entry`}
+                                title="Add or remove people"
+                              >
+                                <UserPlus className="w-3 h-3" />
+                              </button>
+                            </PopoverTrigger>
+                            <EntryPeopleEditor
+                              entryId={entry.entryId}
+                              people={entry.people ?? []}
+                              onChanged={load}
+                            />
+                          </Popover>
+                        )}
+                      </span>
                     );
                   })}
                 </div>
