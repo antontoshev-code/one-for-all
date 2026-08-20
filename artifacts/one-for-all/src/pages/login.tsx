@@ -142,7 +142,8 @@ export default function Login({ onSignedIn }: { onSignedIn: () => void }) {
 
         <p className="text-center text-xs text-muted-foreground mt-5">
           Your entries are private to you. Read the{" "}
-          <Link href="/privacy" className="underline hover:text-foreground">privacy policy</Link>.
+          <Link href="/privacy" className="underline hover:text-foreground">privacy policy</Link>{" "}
+          and <Link href="/terms" className="underline hover:text-foreground">terms</Link>.
         </p>
 
         <p className="text-center text-sm text-muted-foreground mt-5">

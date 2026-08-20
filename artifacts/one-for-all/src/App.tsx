@@ -19,6 +19,7 @@ import People from '@/pages/people';
 import PersonDetail from '@/pages/person-detail';
 import Settings from '@/pages/settings';
 import Privacy from '@/pages/privacy';
+import Terms from '@/pages/terms';
 import History from '@/pages/history';
 import { AppNav } from '@/components/app-nav';
 import Login from '@/pages/login';
@@ -51,7 +52,7 @@ const queryClient = new QueryClient();
  * the only way to read what the app does with your data is to first hand it
  * some. It contains nothing personal, so there is nothing to protect.
  */
-const PUBLIC_PATHS = ['/privacy'];
+const PUBLIC_PATHS = ['/privacy', '/terms'];
 
 function Router() {
   const [location] = useLocation();
@@ -82,6 +83,7 @@ function Router() {
           <Route path="/history" component={History} />
           <Route path="/settings" component={Settings} />
           <Route path="/privacy" component={Privacy} />
+          <Route path="/terms" component={Terms} />
           <Route component={NotFound} />
         </Switch>
         {showNav && <AppNav />}

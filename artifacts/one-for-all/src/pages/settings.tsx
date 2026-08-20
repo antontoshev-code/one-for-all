@@ -347,6 +347,10 @@ export default function Settings() {
               <Link href="/privacy" className="text-primary font-medium hover:underline">
                 Read the full privacy policy
               </Link>
+              <span className="mx-2 text-muted-foreground">·</span>
+              <Link href="/terms" className="text-primary font-medium hover:underline">
+                Terms
+              </Link>
             </p>
           </div>
         </section>
