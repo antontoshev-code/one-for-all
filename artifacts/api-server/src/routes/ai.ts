@@ -5,6 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 import { db, eq, and, notDeleted, peopleTable } from "@workspace/db";
+import { correctTranscript, PLACES_BG, TERMS } from "../lib/vocabulary";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ function heuristicSplit(text: string): string[] {
  * is ignored, so spending it on the most recently updated people is better than
  * letting it truncate arbitrarily.
  */
-async function vocabularyHint(userId: string): Promise<string | undefined> {
+async function userVocabulary(userId: string): Promise<string[]> {
   try {
     const people = await db
       .select({ name: peopleTable.name, aliases: peopleTable.aliases })
@@ -96,10 +97,22 @@ async function vocabularyHint(userId: string): Promise<string | undefined> {
       // Someone you deleted should not be whispered back into transcriptions.
       .where(and(eq(peopleTable.userId, userId), notDeleted(peopleTable)));
 
-    const words = [...new Set(people.flatMap(p => [p.name, ...(p.aliases ?? [])]))]
-      .map(w => w.trim())
-      .filter(Boolean);
+    // Full names are split so "Петя Иванова" repairs a lone "Пети" too.
+    return [...new Set(
+      people
+        .flatMap(p => [p.name, ...(p.aliases ?? [])])
+        .flatMap(w => [w, ...w.split(" ")])
+        .map(w => w.trim())
+        .filter(Boolean),
+    )];
+  } catch (err) {
+    logger.warn({ err }, "Could not load vocabulary — transcribing without it");
+    return [];
+  }
+}
 
+function vocabularyHint(words: string[]): string | undefined {
+  {
     if (words.length === 0) return undefined;
 
     let hint = "";
@@ -112,12 +125,7 @@ async function vocabularyHint(userId: string): Promise<string | undefined> {
     // Phrased as prose rather than a bare list: Whisper conditions on the
     // prompt as if it were preceding speech, so a natural sentence biases
     // better than a comma-separated dump.
-    return `Names that may be mentioned: ${hint}.`;
-  } catch (err) {
-    // A vocabulary hint is an improvement, not a requirement. Losing it must
-    // never cost the user their recording.
-    logger.warn({ err }, "Could not build vocabulary hint — transcribing without it");
-    return undefined;
+    return `Names and places that may be mentioned: ${hint}.`;
   }
 }
 
@@ -151,7 +159,16 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     // empty string — it emits memorised training fragments (Korean news
     // sign-offs, "thanks for watching"), which in a diary is worse than
     // returning nothing at all.
-    const prompt = await vocabularyHint(req.userId);
+    // The user's own people, plus the curated lists. Places and product names
+    // are the other half of what a general model mangles in a Bulgarian
+    // sentence — "Столична" and "Trello" are not words it expects there.
+    const personalWords = await userVocabulary(req.userId);
+    const vocabulary = [...personalWords, ...PLACES_BG, ...TERMS];
+
+    // The prompt gets the personal words only. It is capped at roughly 224
+    // tokens, so spending it on a fixed list would crowd out the names that
+    // actually change per user — and the correction pass below covers the rest.
+    const prompt = vocabularyHint(personalWords);
 
     const result = await openai.audio.transcriptions.create({
       file: audioFile,
@@ -170,7 +187,18 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
       segments?: { no_speech_prob?: number; avg_logprob?: number }[];
     };
 
-    const transcript = (verbose.text ?? "").trim();
+    const raw = (verbose.text ?? "").trim();
+
+    // Whisper ignored the prompt often enough that this is not optional: a
+    // capture naming Петя came back with "Пети" while her name was in it.
+    // Here the answer is deterministic rather than a hint.
+    const { text: transcript, corrections } = correctTranscript(raw, vocabulary);
+    if (corrections.length > 0) {
+      // Count only. The corrected words come from the user's captures, and the
+      // privacy page says server logs never record what they wrote — logging
+      // the words here would quietly make that untrue.
+      logger.info({ count: corrections.length }, "Repaired words against known vocabulary");
+    }
     const segments = verbose.segments ?? [];
 
     // Too short to contain a real thought — almost certainly a mis-tap.
@@ -186,7 +214,9 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
         s => (s.no_speech_prob ?? 0) > 0.6 && (s.avg_logprob ?? 0) < -0.4,
       );
       if (likelySilence) {
-        logger.info({ transcript }, "Discarded probable Whisper hallucination over silence");
+        // Length rather than content: if the silence heuristic ever misfires
+        // this is real speech from someone's diary, and logs must not hold it.
+        logger.info({ chars: transcript.length }, "Discarded probable hallucination over silence");
         return res.json({ transcript: "", source: "no-speech" });
       }
     }
