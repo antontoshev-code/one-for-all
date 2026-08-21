@@ -244,3 +244,37 @@ describe("workout notes stay whole", () => {
     );
   });
 });
+
+describe("real captures that went wrong", () => {
+  test("matches a person by alias across alphabets", () => {
+    // A profile for Елена with "Elena" under Also Known As was not matched
+    // when a capture said "Elena" — only the name field was ever compared,
+    // which made the aliases feature look broken and offered a second Elena.
+    const people = [{ id: 3, name: "Елена", descriptor: "Bella Italiana", aliases: ["Elena"] }];
+    const r = detectNamesInChunk("today Elena said she had a great time", people);
+    assert.equal(r[0]?.matchedPerson?.id, 3);
+  });
+
+  test("still matches by the stored name itself", () => {
+    const people = [{ id: 3, name: "Елена", descriptor: null, aliases: ["Elena"] }];
+    const r = detectNamesInChunk("видях се с Елена днес", people);
+    assert.equal(r[0]?.matchedPerson?.id, 3);
+  });
+
+  test("does not offer Bulgarian landmarks as people", () => {
+    // "Today we went to the Seven Rila Lakes" offered Rila and Lakes.
+    const r = detectNamesInChunk("we went to the Seven Rila Lakes with Elena", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Elena"]);
+  });
+
+  test("does not offer God as a person", () => {
+    // "как за Бога да направя" proposed Бога.
+    const r = detectNamesInChunk("чудя се как за Бога да го направя с Петя", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Петя"]);
+  });
+
+  test("does not offer a Bulgarian town as a person", () => {
+    const r = detectNamesInChunk("утре пътуваме до град Трън с Елена", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Елена"]);
+  });
+});

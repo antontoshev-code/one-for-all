@@ -17,113 +17,105 @@ describe("editDistance", () => {
 });
 
 describe("correctTranscript", () => {
-  test("repairs the name that started this", () => {
-    // Whisper returned "Пети" for "Петя" even with her name in the prompt.
+  test("never changes the text", () => {
+    // It used to. A Bulgarian capture came back with "каква" turned into
+    // "кака" and "добрия" into "Добрич" — each one edit from the vocabulary,
+    // each already correct. Distance cannot tell a mis-hearing from a real
+    // word, so the user decides and the words stay as they were said.
+    const text = "Видях се с Пети вчера";
+    assert.equal(correctTranscript(text, ["Петя", "Елена"]).text, text);
+  });
+
+  test("suggests the name that started this", () => {
     const r = correctTranscript("Видях се с Пети вчера", ["Петя", "Елена"]);
-    assert.equal(r.text, "Видях се с Петя вчера");
     assert.deepEqual(r.corrections, [{ from: "Пети", to: "Петя" }]);
   });
 
-  test("leaves a correctly transcribed name alone", () => {
-    const r = correctTranscript("Видях се с Петя вчера", ["Петя"]);
-    assert.equal(r.text, "Видях се с Петя вчера");
-    assert.deepEqual(r.corrections, []);
+  test("says nothing about a correctly transcribed name", () => {
+    assert.deepEqual(correctTranscript("Видях се с Петя вчера", ["Петя"]).corrections, []);
   });
 
-  test("repairs a mangled place name", () => {
+  test("leaves everyday words alone", () => {
+    // These are the four it actually got wrong in use. Each is one edit from
+    // something in the vocabulary and each was already right.
+    const vocab = ["кака", "майка", "приятел", "Добрич"];
+    for (const [sentence, word] of [
+      ["каква малка подробност", "каква"],
+      ["каква малка подробност", "малка"],
+      ["беше много приятен ден", "приятен"],
+      ["по възможно най-добрия начин", "добрия"],
+    ] as const) {
+      const r = correctTranscript(sentence, vocab);
+      assert.equal(
+        r.corrections.some(c => c.from === word),
+        false,
+        `should not have proposed a change to "${word}"`,
+      );
+    }
+  });
+
+  test("suggests a mangled place name", () => {
     const r = correctTranscript("пред Солична община", ["Столична"]);
-    assert.equal(r.text, "пред Столична община");
-  });
-
-  test("keeps punctuation and spacing intact", () => {
-    const r = correctTranscript("Здрасти, Пети! Как си?", ["Петя"]);
-    assert.equal(r.text, "Здрасти, Петя! Как си?");
+    assert.deepEqual(r.corrections, [{ from: "Солична", to: "Столична" }]);
   });
 
   test("refuses to guess between two equally close words", () => {
-    // "Дана" is one edit from both. A coin flip must not edit a diary.
-    const r = correctTranscript("видях Дана", ["Дани", "Дара"]);
-    assert.equal(r.text, "видях Дана");
-    assert.deepEqual(r.corrections, []);
+    assert.deepEqual(correctTranscript("видях Дана", ["Дани", "Дара"]).corrections, []);
   });
 
   test("never touches very short words", () => {
-    // At three characters almost everything is one edit from something else.
-    const r = correctTranscript("Ана дойде", ["Иван"]);
-    assert.equal(r.text, "Ана дойде");
+    assert.deepEqual(correctTranscript("Ана дойде", ["Иван"]).corrections, []);
   });
 
   test("leaves short lowercase words alone", () => {
-    // "дене" is not claiming to be a name; only a capital letter earns the
-    // benefit of the doubt at this length.
-    const r = correctTranscript("беше дене там", ["Дени"]);
-    assert.equal(r.text, "беше дене там");
+    assert.deepEqual(correctTranscript("беше дене там", ["Дени"]).corrections, []);
   });
 
-  test("repairs a long lowercase word", () => {
-    // By nine characters a collision with a real word is vanishingly unlikely,
-    // so case stops mattering — this is the тараторче case.
+  test("suggests a long lowercase word", () => {
     const r = correctTranscript("направихме тараточе", ["тараторче"]);
-    assert.equal(r.text, "направихме тараторче");
+    assert.deepEqual(r.corrections, [{ from: "тараточе", to: "тараторче" }]);
   });
 
-  test("does not rewrite ordinary words into vocabulary", () => {
-    const r = correctTranscript("направихме си лимонада", ["Елена", "Петя"]);
-    assert.equal(r.text, "направихме си лимонада");
+  test("does not propose rewriting an ordinary word into vocabulary", () => {
+    assert.deepEqual(correctTranscript("направихме си лимонада", ["Елена", "Петя"]).corrections, []);
   });
 
-  test("allows a wider budget for longer words", () => {
-    const r = correctTranscript("бях в Пловдиф днес", ["Пловдив"]);
-    assert.equal(r.text, "бях в Пловдив днес");
+  test("handles an empty vocabulary", () => {
+    assert.deepEqual(correctTranscript("Видях се с Пети", []).corrections, []);
   });
 
-  test("handles an empty vocabulary without changing anything", () => {
-    const r = correctTranscript("Видях се с Пети", []);
-    assert.equal(r.text, "Видях се с Пети");
+  test("ignores multi-word vocabulary entries", () => {
+    assert.deepEqual(correctTranscript("бях в Загорa", ["Стара Загора"]).corrections, []);
   });
 
-  test("ignores multi-word vocabulary entries when matching one token", () => {
-    // "Стара Загора" cannot match a single token, and trying would add noise.
-    const r = correctTranscript("бях в Загорa", ["Стара Загора"]);
-    assert.deepEqual(r.corrections, []);
+  test("says nothing about a word that is already known", () => {
+    assert.deepEqual(correctTranscript("използвам TRELLO всеки ден", ["Trello"]).corrections, []);
   });
 
-  test("is case-insensitive when deciding a word is already known", () => {
-    const r = correctTranscript("използвам TRELLO всеки ден", ["Trello"]);
-    assert.deepEqual(r.corrections, []);
-  });
-
-  test("repairs a kinship term heard as a name", () => {
-    // "Дали вуйчо ще се чувства окей?" came back as "Войчо", which then read
-    // as a person and was offered as someone to add. One vowel turns the word
-    // for uncle into a plausible Bulgarian name.
+  test("suggests a kinship term heard as a name", () => {
     const r = correctTranscript("Дали Войчо ще се чувства окей", ADDRESS_BG);
-    assert.equal(r.text, "Дали вуйчо ще се чувства окей");
+    assert.deepEqual(r.corrections, [{ from: "Войчо", to: "вуйчо" }]);
   });
 
-  test("repairs a loanword carrying a definite article", () => {
-    // Said "съпорта", heard "саппорта". Bulgarian attaches its article to the
-    // word, so the comparison has to happen on the stem and the article be
-    // given back afterwards.
+  test("suggests a loanword carrying a definite article", () => {
     const r = correctTranscript("Справих се с саппорта", LOANWORDS_BG);
-    assert.equal(r.text, "Справих се с съпорта");
+    assert.deepEqual(r.corrections, [{ from: "саппорта", to: "съпорта" }]);
   });
 
-  test("repairs a loanword without an article", () => {
-    const r = correctTranscript("отворихме един тикед", LOANWORDS_BG);
-    assert.equal(r.text, "отворихме един тикет");
+  test("says nothing about a loanword that is already right", () => {
+    assert.deepEqual(
+      correctTranscript("Справих се с съпорта и тикета", LOANWORDS_BG).corrections,
+      [],
+    );
   });
 
-  test("does not mangle a word that is already right", () => {
-    const r = correctTranscript("Справих се с съпорта и тикета", LOANWORDS_BG);
-    assert.deepEqual(r.corrections, []);
+  test("proposes a repeated word only once", () => {
+    const r = correctTranscript("Пети дойде и Пети си тръгна", ["Петя"]);
+    assert.equal(r.corrections.length, 1);
   });
 
   test("requires the first letter to match", () => {
-    // Without this the generous distance budget would start rewriting
-    // unrelated words into vocabulary.
-    const r = correctTranscript("направихме лимонада", ["димоната"]);
-    assert.deepEqual(r.corrections, []);
+    assert.deepEqual(correctTranscript("направихме лимонада", ["димоната"]).corrections, []);
   });
 
   test("ships usable seed lists", () => {

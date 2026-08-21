@@ -30,6 +30,7 @@ import {
   splitIntoChunks,
   groupIntoUnits,
   detectNamesInChunk,
+  personMatches,
   type NameDetectionResult,
 } from "@/lib/heuristics";
 // categorizeTexts / detectPersonNames no longer needed — replaced by /api/ai/split
@@ -187,7 +188,7 @@ function carryOverDecisions(fresh: PieceName[], decided: PieceName[]): PieceName
  */
 function resolveDetectedNames(
   detected: string[],
-  people: { id: number; name: string; descriptor?: string | null }[],
+  people: { id: number; name: string; descriptor?: string | null; aliases?: string[] | null }[],
 ): NameDetectionResult[] {
   const seen = new Set<string>();
   const results: NameDetectionResult[] = [];
@@ -197,10 +198,7 @@ function resolveDetectedNames(
     if (!key || seen.has(key)) continue;
     seen.add(key);
 
-    const matches = people.filter(p => {
-      const firstName = p.name.split(' ')[0].toLowerCase();
-      return p.name.toLowerCase() === key || firstName === key;
-    });
+    const matches = people.filter(p => personMatches(p, name));
 
     if (matches.length > 1) results.push({ matchedPeople: matches });
     else if (matches.length === 1) results.push({ matchedPerson: matches[0] });

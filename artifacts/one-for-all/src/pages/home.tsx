@@ -456,38 +456,56 @@ export default function Home() {
                     <span>Here are your thoughts — check before saving</span>
                   </div>
                 )}
-                {/* Did you mean — one chip per repaired word. */}
+                {/* Suggestions, not changes. Applying them silently rewrote
+                    words that were already right, and gave nobody a reason to
+                    look — a wrong substitution reads as something they said. */}
                 {transcriptBadge === "real" && corrections.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2 px-1">
                     <span className="text-xs text-muted-foreground">Did you mean</span>
                     {corrections.map((c, i) => (
-                      <button
+                      <span
                         key={`${c.from}-${i}`}
-                        type="button"
-                        onClick={() => {
-                          // Put the original word back, and drop the chip. Only
-                          // the first occurrence: repeated words were corrected
-                          // separately and each has its own chip.
-                          setContent(prev => prev.replace(c.to, c.from));
-                          setCorrections(prev => prev.filter((_, idx) => idx !== i));
-
-                          // Rejecting a correction is information too: without
-                          // recording it, the same wrong suggestion would come
-                          // back on every capture with no way to stop it.
-                          fetch("/api/vocabulary/keep", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ word: c.from }),
-                          }).catch(err => console.warn("[vocabulary] keep failed", err));
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs hover:bg-secondary/70 transition-colors"
-                        title={`Change "${c.to}" back to "${c.from}"`}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs"
                       >
-                        <span className="text-muted-foreground line-through">{c.from}</span>
+                        <span className="text-muted-foreground">{c.from}</span>
                         <span aria-hidden>→</span>
                         <span className="font-medium text-foreground">{c.to}</span>
-                        <span className="text-muted-foreground ml-0.5">undo</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Only the first occurrence: each proposal is made
+                            // once, and replacing every instance would change
+                            // words the user was not shown.
+                            setContent(prev => prev.replace(c.from, c.to));
+                            setCorrections(prev => prev.filter((_, idx) => idx !== i));
+                            void fetch("/api/vocabulary", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ word: c.to }),
+                            }).catch(err => console.warn("[vocabulary] add failed", err));
+                          }}
+                          className="ml-0.5 text-primary font-medium hover:text-primary/80"
+                        >
+                          apply
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCorrections(prev => prev.filter((_, idx) => idx !== i));
+                            // Dismissing says the word was right. Recording that
+                            // stops the same proposal returning every time.
+                            void fetch("/api/vocabulary/keep", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ word: c.from }),
+                            }).catch(err => console.warn("[vocabulary] keep failed", err));
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label={`Dismiss the suggestion to change ${c.from}`}
+                        >
+                          ✕
+                        </button>
+                      </span>
                     ))}
                   </div>
                 )}

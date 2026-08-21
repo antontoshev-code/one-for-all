@@ -1,16 +1,18 @@
 /**
- * Repair proper nouns that transcription mangled.
+ * Suggests repairs for proper nouns that transcription mangled.
  *
- * Whisper's `prompt` biases decoding toward words you supply, but it is a hint
- * and nothing more — a capture that named Петя came back with "Пети" despite
- * her being in the prompt. So the names are also checked afterwards, where the
- * answer is deterministic: "Пети" is one character from a word this user
- * actually uses, and no dictionary word, so it is a transcription error.
+ * SUGGESTS. It used to apply them, and that was wrong in a way only real use
+ * revealed: a Bulgarian capture came back with "каква" changed to "кака",
+ * "малка" to "майка" and "добрия" to "Добрич" — every one a single edit away
+ * from a word in the vocabulary, and every one of them already correct.
  *
- * The rules are deliberately timid. Rewriting words in someone's diary is a
- * serious thing to do silently, and a wrong correction is worse than the
- * mis-heard word it replaced — the user can spot "Пети" and fix it, but a
- * confident wrong substitution reads as something they said.
+ * Edit distance cannot tell a mis-hearing from a real word, because by that
+ * measure they are identical: "Пети" for "Петя" is one edit, and so is "каква"
+ * for "кака". The difference is meaning, which this has no access to.
+ *
+ * So the user decides. A suggestion costs a glance and one tap when it is
+ * right; a silent substitution changes what somebody said about their own life
+ * and gives them no reason to look.
  */
 
 /** Cheap Levenshtein with an early exit once the budget is blown. */
@@ -130,9 +132,45 @@ export const TERMS = [
   "тараторче", "таратор", "баница", "лютеница", "мусака", "шопска",
 ];
 
+/**
+ * Everyday Bulgarian words, which are never offered as a correction.
+ *
+ * Without this the suggestions are worse than useless: "каква", "малка" and
+ * "добрия" are each one edit from something in the vocabulary, so every capture
+ * arrived with a row of confident, wrong proposals. A suggestion someone has to
+ * reject four times is a suggestion they stop reading.
+ *
+ * Not a dictionary — just the words common enough that seeing one is evidence
+ * the transcription got it right.
+ */
+const COMMON_BG = new Set([
+  "какъв", "каква", "какво", "какви", "който", "която", "което", "които",
+  "този", "тази", "това", "тези", "онзи", "онази", "онова", "онези",
+  "малък", "малка", "малко", "малки", "голям", "голяма", "голямо", "големи",
+  "добър", "добра", "добро", "добри", "добрия", "добрият", "добре",
+  "приятен", "приятна", "приятно", "приятни", "хубав", "хубава", "хубаво",
+  "много", "повече", "най-много", "най-добре", "мога", "може", "можеш",
+  "можем", "можете", "могат", "имам", "имаш", "има", "имаме", "имате", "имат",
+  "нямам", "няма", "съм", "сме", "сте", "бях", "беше", "бяхме", "бяха",
+  "ще", "щях", "щеше", "трябва", "трябваше", "искам", "искаш", "иска",
+  "правя", "правиш", "прави", "направя", "направих", "направихме",
+  "казвам", "казах", "каза", "казал", "говоря", "говорих", "говорихме",
+  "виждам", "видях", "видяхме", "чувам", "чух", "чувствам", "чувствах",
+  "мисля", "мислех", "мислим", "знам", "знаех", "разбирам", "разбрах",
+  "ходя", "ходих", "отивам", "отидох", "идвам", "дойде", "дойдох",
+  "работа", "работя", "работих", "време", "днес", "утре", "вчера",
+  "сега", "после", "преди", "докато", "защото", "обаче", "също",
+  "така", "като", "само", "още", "вече", "отново",
+  "човек", "хора", "нещо", "неща", "място", "места", "начин", "начини",
+  "живот", "нощ", "сутрин", "вечер", "седмица", "месец", "година",
+  "къща", "стая", "град", "село", "кола", "телефон",
+  "приятел", "приятели", "приятелка", "семейство", "дете", "деца",
+]);
+
 export interface CorrectionResult {
+  /** Unchanged. The words come back exactly as transcription heard them. */
   text: string;
-  /** What changed, so the user can be shown rather than silently overruled. */
+  /** Offered to the user, never applied on their behalf. */
   corrections: { from: string; to: string }[];
 }
 
@@ -150,11 +188,12 @@ export function correctTranscript(text: string, vocabulary: string[]): Correctio
 
   const knownLower = new Set(vocabulary.map(w => w.trim().toLowerCase()));
   const corrections: { from: string; to: string }[] = [];
+  const proposed = new Set<string>();
 
   /**
    * The single closest known word, or null when nothing is close enough or two
-   * candidates tie. A tie is a coin flip, and a coin flip has no business
-   * editing a diary.
+   * candidates tie. A tie is a coin flip, and a coin flip has nothing useful to
+   * say about somebody's diary.
    */
   const closest = (token: string): string | null => {
     const lower = token.toLowerCase();
@@ -167,8 +206,8 @@ export function correctTranscript(text: string, vocabulary: string[]): Correctio
 
     for (const word of known) {
       const candidate = word.toLowerCase();
-      // Transcription mangles the middle and end of a word, almost never the
-      // opening sound. Requiring it to match rejects unrelated words outright.
+      // Transcription mangles the middle and end of a word and almost never the
+      // opening sound, so requiring it to match rejects unrelated words outright.
       if (candidate[0] !== lower[0]) continue;
 
       const distance = editDistance(lower, candidate, budget);
@@ -186,40 +225,41 @@ export function correctTranscript(text: string, vocabulary: string[]): Correctio
     return tied ? null : best;
   };
 
-  // Split on word characters so punctuation and spacing survive untouched.
-  const corrected = text.replace(/\p{L}+/gu, token => {
+  for (const match of text.matchAll(/\p{L}+/gu)) {
+    const token = match[0];
     const lower = token.toLowerCase();
-    if (knownLower.has(lower)) return token;
+
+    if (knownLower.has(lower)) continue;
+    // An everyday word is evidence the transcription got it right. Proposing a
+    // change to one is noise, and noise is what makes suggestions get ignored.
+    if (COMMON_BG.has(lower)) continue;
+    if (proposed.has(lower)) continue;
 
     const stems = articleStems(token);
-
-    // An inflected form of a word already in the vocabulary is correct as it
-    // stands. Without this check, "съпорта" gets "corrected" to "съпорт" —
-    // stripping the article off a word that was right all along.
-    if (stems.some(stem => knownLower.has(stem.toLowerCase()))) return token;
+    // An inflected form of a known word is already correct as it stands.
+    if (stems.some(stem => knownLower.has(stem.toLowerCase()))) continue;
+    if (stems.some(stem => COMMON_BG.has(stem.toLowerCase()))) continue;
 
     const direct = closest(token);
     if (direct) {
+      proposed.add(lower);
       corrections.push({ from: token, to: direct });
-      return direct;
+      continue;
     }
 
     // Bulgarian attaches its definite article to the end of the word, so
-    // "саппорта" has to be compared as "саппорт" and then given its article
-    // back. Without this every inflected word sits an extra edit or two from
-    // its own dictionary form and nothing is ever repaired.
+    // "саппорта" has to be compared as "саппорт" and given its article back.
     for (const stem of stems) {
-      const match = closest(stem);
-      if (!match) continue;
-      const rebuilt = match + token.slice(stem.length);
-      corrections.push({ from: token, to: rebuilt });
-      return rebuilt;
+      const viaStem = closest(stem);
+      if (!viaStem) continue;
+      proposed.add(lower);
+      corrections.push({ from: token, to: viaStem + token.slice(stem.length) });
+      break;
     }
+  }
 
-    return token;
-  });
-
-  return { text: corrected, corrections };
+  // The text is returned untouched. Everything above is a proposal.
+  return { text, corrections };
 }
 
 /**

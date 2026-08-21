@@ -241,6 +241,11 @@ const ADDRESS_WORDS = new Set([
   "Зет", "Снаха", "Свекър", "Свекърва", "Тъст", "Тъща",
   "Кум", "Кума", "Кръстник", "Кръстница",
   "Съпруг", "Съпруга", "Годеник", "Годеница", "Гадже",
+  // Not people, however capitalised. "как за Бога да направя" offered Бога —
+  // God — as somebody to add to an address book.
+  "Бог", "Бога", "Боже", "Господ", "Господи", "Христос", "Исус", "Аллах",
+  "Богородица", "Дева", "Съдба", "Природа", "Вселена", "Земя", "Слънце", "Луна",
+  "God", "Lord", "Jesus", "Christ", "Allah", "Buddha", "Universe", "Nature",
   "Приятел", "Приятелка", "Колега", "Колежка", "Съсед", "Съседка",
   "Шеф", "Шефе", "Господине", "Госпожо", "Госпожице", "Момче", "Момиче",
   "Миличък", "Миличка", "Скъпи", "Скъпа", "Съкровище",
@@ -288,6 +293,26 @@ const PLACE_WORDS = new Set([
   "Дунав", "Люлин", "Младост", "Лозенец", "Столична",
   "Берлин", "Париж", "Лондон", "Рим", "Милано", "Виена", "Прага", "Атина",
   "Истанбул", "Мадрид", "Барселона", "Амстердам", "Брюксел", "Будапеща",
+
+  // ── Bulgarian landmarks and natural places ──────────────────────────────
+  // "Today we went to the Seven Rila Lakes" offered Rila and Lakes as people.
+  "Рила", "Rila", "Пирин", "Pirin", "Родопи", "Rodopi", "Витоша", "Vitosha",
+  "Мусала", "Musala", "Вихрен", "Vihren", "Мальовица", "Malyovitsa",
+  "Езера", "Езеро", "Lakes", "Lake", "Планина", "Mountain", "Връх", "Peak",
+  "Рилски", "Rilski", "Рилските", "Седемте", "Sedemte", "Seven",
+  "Балкан", "Balkan", "Странджа", "Strandzha", "Сакар", "Sakar",
+  "Осогово", "Osogovo", "Беласица", "Belasitsa", "Средна", "Sredna",
+  "Мадара", "Madara", "Перперикон", "Perperikon", "Царевец", "Tsarevets",
+  "Бузлуджа", "Buzludzha", "Шипка", "Shipka", "Копривщица", "Koprivshtitsa",
+  "Мелник", "Melnik", "Жеравна", "Zheravna", "Арбанаси", "Arbanasi",
+  "Боровец", "Borovets", "Банско", "Bansko", "Пампорово", "Pamporovo",
+  "Дунав", "Danube", "Марица", "Maritsa", "Искър", "Iskar", "Струма", "Struma",
+  "Черно", "Тракия", "Thrace", "Македония", "Добруджа",
+  "Люлин", "Lyulin", "Младост", "Mladost", "Дружба", "Druzhba", "Обеля",
+  "Лозенец", "Lozenets", "Слатина", "Slatina", "Надежда", "Овча", "Бояна",
+  "Драгалевци", "Симеоново", "Банкя", "Bankya", "Княжево", "Хладилника",
+  "Студентски", "Изгрев", "Изток", "Гео", "Милев", "Редута", "Стрелбище",
+  "Трън", "Tran", "Trun",
 
   // ── English ─────────────────────────────────────────────────────────────
   "Bulgaria", "Italy", "Germany", "France", "Spain", "Greece", "Turkey",
@@ -402,6 +427,32 @@ export interface NameDetectionResult {
 }
 
 /**
+ * Whether a word refers to this person.
+ *
+ * Aliases count. A profile for Елена with "Elena" listed under Also Known As
+ * was not matched when a capture said "Elena", because only the name field was
+ * ever compared — which made the aliases feature look broken and offered to
+ * create a second Elena instead. Different alphabets are exactly what that
+ * field exists for.
+ */
+export function personMatches(
+  person: { name: string; aliases?: string[] | null },
+  word: string,
+): boolean {
+  const key = word.trim().toLowerCase();
+  if (!key) return false;
+
+  const forms = [person.name, ...(person.aliases ?? [])];
+
+  return forms.some(form => {
+    const full = form.trim().toLowerCase();
+    if (full === key) return true;
+    // A first name on its own is how people are usually mentioned.
+    return full.split(" ")[0] === key;
+  });
+}
+
+/**
  * Find every person name in a chunk, one result per distinct name.
  *
  * Two things were wrong before. It returned after the first candidate, so a
@@ -417,7 +468,7 @@ export interface NameDetectionResult {
  */
 export function detectNamesInChunk(
   chunk: string,
-  existingPeople: { id: number; name: string; descriptor?: string | null }[]
+  existingPeople: { id: number; name: string; descriptor?: string | null; aliases?: string[] | null }[]
 ): NameDetectionResult[] {
   const results: NameDetectionResult[] = [];
   const seen = new Set<string>();
@@ -427,10 +478,7 @@ export function detectNamesInChunk(
     const key = candidate.toLowerCase();
     if (seen.has(key)) continue;
 
-    const matches = existingPeople.filter(p => {
-      const firstName = p.name.split(' ')[0].toLowerCase();
-      return p.name.toLowerCase() === key || firstName === key;
-    });
+    const matches = existingPeople.filter(p => personMatches(p, candidate));
 
     if (matches.length > 0) {
       seen.add(key);
