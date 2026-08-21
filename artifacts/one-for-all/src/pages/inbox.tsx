@@ -24,7 +24,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatDueDate } from "@/lib/utils";
+import { googleCalendarUrl } from "@/lib/calendar";
 import {
   categorizeContent,
   splitIntoChunks,
@@ -465,6 +466,30 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
           }).catch(err => console.warn('[History] Failed to record capture', err));
         }
         invalidateAll();
+
+        // Filing a capture is easily done by mistake — Accept and "Keep it as
+        // one" are one tap, and the card disappears. Putting it back is just
+        // the category returning to inbox, so undo here is honest.
+        toast({
+          title: category === 'inbox' ? "Returned to Inbox" : `Filed as ${category}`,
+          action: (
+            <ToastAction
+              altText="Undo"
+              onClick={() => {
+                updateEntry.mutate({ id: entry.id, data: { category: 'inbox' } }, {
+                  onSuccess: () => invalidateAll(),
+                });
+              }}
+            >
+              Undo
+            </ToastAction>
+          ),
+        });
+
+        const due = (entry as { dueAt?: string | null }).dueAt;
+        if (due && category === 'task') {
+          offerCalendar([{ text: entry.content ?? "Task", dueAt: new Date(due) }]);
+        }
       },
     });
   };
@@ -581,6 +606,43 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     setSplitPieces(prev => prev.map((p, idx) => idx === i ? { ...p, ...patch } : p));
   };
 
+  /**
+   * Offer to put a scheduled task in the calendar, once it is saved.
+   *
+   * A toast rather than a step in the flow: the link has to open from a tap, or
+   * the browser blocks it as a popup, and nobody wants a new tab thrown at them
+   * for a task they were only filing. One tap if they want it, ignored if not.
+   */
+  const offerCalendar = (scheduled: { text: string; dueAt: Date }[]) => {
+    if (scheduled.length === 0) return;
+
+    const [first] = scheduled;
+    toast({
+      title: scheduled.length === 1
+        ? `Saved for ${formatDueDate(first.dueAt)}`
+        : `${scheduled.length} tasks saved with times`,
+      description: scheduled.length === 1 ? undefined : "Add the first to your calendar?",
+      action: (
+        <ToastAction
+          altText="Add to calendar"
+          onClick={() => {
+            window.open(
+              googleCalendarUrl({
+                title: first.text,
+                start: first.dueAt,
+                uid: `one-for-all-${first.dueAt.getTime()}`,
+              }),
+              "_blank",
+              "noopener,noreferrer",
+            );
+          }}
+        >
+          Add to calendar
+        </ToastAction>
+      ),
+    });
+  };
+
   const handleConfirmSplit = async () => {
     const accepted = splitPieces.filter(p => p.accepted);
     if (accepted.length === 0) return;
@@ -589,6 +651,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     setIsConfirming(true);
     try {
       const createdEntries: { entryId: number; category: string }[] = [];
+      const scheduled: { text: string; dueAt: Date }[] = [];
 
       for (const piece of accepted) {
         // Resolve every name the user acted on. One sentence can link an
@@ -629,6 +692,13 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         });
 
         createdEntries.push({ entryId: newEntry.id, category: piece.category });
+
+        // Offered at the moment it is saved, not left to be found later under
+        // Tasks. A reminder you have to go looking for is one you set once and
+        // then stop bothering with.
+        if (piece.dueAt && piece.category === 'task') {
+          scheduled.push({ text: piece.text, dueAt: new Date(piece.dueAt) });
+        }
 
         // Separate call because the entry schemas are generated from the
         // OpenAPI spec, and regenerating that client has broken this build
@@ -674,6 +744,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
       // Await the refetch so the list is already updated before we dismiss
       await invalidateAll();
       setSplitMode('off');
+
+      offerCalendar(scheduled);
     } catch (e) {
       console.error("Split confirm failed", e);
       setIsConfirming(false);
