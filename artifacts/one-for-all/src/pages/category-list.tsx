@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useListEntries, useUpdateEntry, useDeleteEntry,
   getListEntriesQueryKey, getGetEntryStatsQueryKey,
@@ -72,7 +72,28 @@ export default function CategoryList({ category, title, description }: CategoryL
   const deleteEntry = useDeleteEntry();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  /**
+   * Arriving from History with ?entry=… opens that entry and scrolls to it.
+   *
+   * The link used to point at the whole list, which for someone who has just
+   * found the thing they were looking for in History means losing it again
+   * among forty others.
+   */
+  const requestedId = (() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("entry");
+    const id = raw ? Number(raw) : NaN;
+    return Number.isInteger(id) ? id : null;
+  })();
+
+  const [expandedId, setExpandedId] = useState<number | null>(requestedId);
+
+  useEffect(() => {
+    if (requestedId === null || !entries?.length) return;
+    // After the list has rendered, so the element exists to scroll to.
+    const node = document.getElementById(`entry-${requestedId}`);
+    node?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [requestedId, entries]);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
@@ -283,6 +304,7 @@ export default function CategoryList({ category, title, description }: CategoryL
             return (
               <div
                 key={entry.id}
+                id={`entry-${entry.id}`}
                 onClick={() => {
                   // Don't collapse while editing
                   if (isEditing) return;

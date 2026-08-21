@@ -301,7 +301,11 @@ export default function History() {
 
                     return (
                       <span key={j} className="inline-flex items-center gap-1">
-                        <Link href={route}>
+                        {/* Straight to the entry, not to the list containing
+                            it. History is where you go to find one particular
+                            thing, and landing on a page of forty is not finding
+                            it. */}
+                        <Link href={entry.entryId !== null ? `${route}?entry=${entry.entryId}` : route}>
                           <span className={`inline-flex items-center text-xs px-2.5 py-1 rounded-full hover:opacity-80 transition-opacity cursor-pointer ${colourClass}`}>
                             {label}
                           </span>
