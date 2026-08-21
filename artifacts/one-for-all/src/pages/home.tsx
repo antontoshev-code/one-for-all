@@ -326,16 +326,38 @@ export default function Home() {
         const res = await fetch("/api/ai/categorize", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ texts: [content] }),
+          // The clock travels with the text: "tonight at 9pm" cannot be
+          // resolved without it, and the server's own clock is in another
+          // continent.
+          body: JSON.stringify({
+            texts: [content],
+            now: new Date().toISOString(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }),
         });
         if (res.ok) {
-          const { categories } = await res.json() as { categories?: string[] };
+          const { categories, dueDates } = await res.json() as {
+            categories?: string[];
+            dueDates?: (string | null)[];
+          };
           const suggested = categories?.[0];
           if (suggested) {
             await updateEntry.mutateAsync({
               id: entry.id,
               data: { suggestedCategory: suggested as never },
             });
+          }
+
+          // A task captured and accepted whole used to lose its time entirely —
+          // only splitting picked one up, which is not the path most captures
+          // take.
+          const due = dueDates?.[0];
+          if (due) {
+            await fetch(`/api/entries/${entry.id}/due`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ dueAt: due }),
+            }).catch(err => console.warn("[due] Failed to save the time", err));
           }
         }
       } catch (err) {

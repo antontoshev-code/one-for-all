@@ -320,7 +320,12 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
 // Returns { categories: Category[], source: 'claude' | 'heuristic' }.
 
 router.post("/ai/categorize", aiQuota, async (req, res) => {
-  const { texts } = req.body as { texts: string[] };
+  const { texts, now, timeZone } = req.body as {
+    texts: string[];
+    /** The client's clock. "tonight at 9pm" cannot be resolved without it. */
+    now?: string;
+    timeZone?: string;
+  };
 
   if (!Array.isArray(texts) || texts.length === 0) {
     return res.status(400).json({ error: "texts must be a non-empty array" });
@@ -332,6 +337,12 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
       detail: `Limit is ${MAX_TEXT_CHARS.toLocaleString()} characters across all items.`,
     });
   }
+
+  // Trusted only as far as being a real timestamp: it decides what "tonight"
+  // means, so a malformed value falls back to no context rather than reaching
+  // the model as nonsense.
+  const nowIso = now && !Number.isNaN(Date.parse(now)) ? new Date(now).toISOString() : null;
+  const zone = typeof timeZone === "string" && /^[\w+\-/]{1,64}$/.test(timeZone) ? timeZone : null;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
@@ -363,6 +374,12 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
                 description:
                   "Category for each input text, in the same order. Must be the same length as the input.",
               },
+              dueDates: {
+                type: "array",
+                items: { type: ["string", "null"] },
+                description:
+                  "For each input, when a task states when it happens, as an ISO 8601 timestamp with the offset. Null for anything without a stated time, which is most of them — a made-up deadline is worse than no deadline.",
+              },
             },
             required: ["categories"],
           },
@@ -375,13 +392,20 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
 - idea: creative thoughts, concepts, what-if proposals, something to build, explore, or try
 - log: ONLY body / health / physical tracking — workouts, sleep, eating, physical symptoms, pain, medication, weight, heart rate; do NOT use log for general activities like "went to a store" or "spent time outside"
 
-TENSE IS DECISIVE between journal and task. A task has not happened yet. "I sorted out the support ticket and opened a case" is journal — it is done, the user is recounting it. "I need to prepare the tea before we leave" is a task — it is still ahead of them. Past tense is never a task however action-like the verbs are; a completed action recounted is the diary.`,
+TENSE IS DECISIVE between journal and task. A task has not happened yet. "I sorted out the support ticket and opened a case" is journal — it is done, the user is recounting it. "I need to prepare the tea before we leave" is a task — it is still ahead of them. Past tense is never a task however action-like the verbs are; a completed action recounted is the diary.
+
+Due times: when a task says when it happens — "tonight at 9pm", "утре в 8:30", "Wednesday morning" — resolve it against the current time given below and return it in dueDates. Null for anything without a stated time, which is most of them. Never invent one: a reminder in someone's calendar for a moment they did not choose is worse than no reminder.`,
       messages: [
         {
           role: "user",
-          content: `Classify each of these ${texts.length} text(s):\n${texts
-            .map((t, i) => `${i + 1}. ${t}`)
-            .join("\n")}`,
+          content: [
+            // Relative times are the common case in speech, and the server's
+            // clock is not the user's — it runs in North America.
+            nowIso ? `Current time where the user is: ${nowIso}${zone ? ` (${zone})` : ""}` : "",
+            `Classify each of these ${texts.length} text(s):\n${texts
+              .map((t, i) => `${i + 1}. ${t}`)
+              .join("\n")}`,
+          ].filter(Boolean).join("\n\n"),
         },
       ],
     });
@@ -391,17 +415,33 @@ TENSE IS DECISIVE between journal and task. A task has not happened yet. "I sort
       throw new Error("No tool_use block in Claude response");
     }
 
-    const raw = (toolUse.input as { categories?: string[] }).categories ?? [];
+    const input = toolUse.input as { categories?: string[]; dueDates?: unknown };
+    const raw = input.categories ?? [];
     const categories: Category[] = texts.map((t, i) =>
       VALID_CATEGORIES.includes(raw[i] as Category)
         ? (raw[i] as Category)
         : heuristicCategory(t)
     );
 
-    return res.json({ categories, source: "claude" });
+    // Same guard as the splitter: a time only counts if it parses and has not
+    // already passed by more than a day, so a misread date cannot schedule a
+    // reminder for a moment that is gone.
+    const rawDue = Array.isArray(input.dueDates) ? input.dueDates : [];
+    const dueDates = texts.map((_, i) => {
+      const value = rawDue[i];
+      if (typeof value !== "string" || Number.isNaN(Date.parse(value))) return null;
+      const due = new Date(value);
+      return due.getTime() >= Date.now() - 24 * 60 * 60 * 1000 ? due.toISOString() : null;
+    });
+
+    return res.json({ categories, dueDates, source: "claude" });
   } catch (err) {
     logger.error({ err }, "Claude categorization failed — falling back to heuristic");
-    return res.json({ categories: texts.map(heuristicCategory), source: "heuristic" });
+    return res.json({
+      categories: texts.map(heuristicCategory),
+      dueDates: texts.map(() => null),
+      source: "heuristic",
+    });
   }
 });
 
