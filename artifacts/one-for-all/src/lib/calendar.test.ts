@@ -206,3 +206,20 @@ describe("calendarTitleFor", () => {
     assert.ok((url.searchParams.get("text") ?? "").length < thought.length);
   });
 });
+
+describe("titles from real captures", () => {
+  test("does not title an event with a vague time phrase", () => {
+    // This became "По някое време" — the one part of the sentence carrying no
+    // information about what the task actually is.
+    const thought = "По някое време, утре, може би към 11.00 е хубаво да проверя " +
+      "маслото на колата, за да съм сигурен всичко е наред.";
+    const title = calendarTitleFor(thought);
+    assert.notEqual(title, "По някое време", "still titled by the time phrase");
+    assert.match(title, /масло/i, `does not say what the task is: ${title}`);
+  });
+
+  test("drops an English vague opening too", () => {
+    const title = calendarTitleFor("At some point tomorrow, check the oil in the car");
+    assert.ok(/oil|car|check/i.test(title), `uninformative title: ${title}`);
+  });
+});

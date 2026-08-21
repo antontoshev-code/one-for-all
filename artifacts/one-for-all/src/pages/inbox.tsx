@@ -842,9 +842,13 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
                 <>
                   {partCategories.map(({ category, count }, i) => (
                     <span key={category}>
-                      {i > 0 && <span className="text-muted-foreground"> &amp; </span>}
+                      {i > 0 && <span className="text-muted-foreground">{" "}&amp;{" "}</span>}
+                      {/* Plural, not counted. The count came from the local
+                          estimate and the split is done by the model, so
+                          "2 Tasks" could promise four pieces and produce three.
+                          Plurality is the part that is reliably true. */}
                       <span className="capitalize font-semibold text-primary">
-                        {count > 1 ? `${count} ${category}s` : category}
+                        {count > 1 ? `${category}s` : category}
                       </span>
                     </span>
                   ))}

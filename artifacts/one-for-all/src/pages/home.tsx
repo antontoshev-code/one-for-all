@@ -456,9 +456,12 @@ export default function Home() {
             {/* Said here rather than in Settings, because it only matters in the
                 two seconds before someone starts talking. Most transcription
                 mistakes are a phone held at arm's length in the wind. */}
-            <p className="text-xs text-muted-foreground text-center max-w-[240px] leading-relaxed">
-              Speak clearly and hold the phone close — it makes a real difference
-              to how well your words come back.
+            <p className="text-xs text-muted-foreground text-center max-w-[260px] leading-relaxed">
+              {/* "hold the phone close" excluded everyone on a laptop, and most
+                  transcription failures are a microphone too far away on any
+                  device. */}
+              <strong className="text-foreground">Speak clearly &amp; stay close to the mic</strong>
+              {" — it makes a real difference to how well your words come back."}
             </p>
           </div>
         )}
@@ -471,14 +474,17 @@ export default function Home() {
                 <Mic className="w-10 h-10 animate-pulse" />
               </div>
               <p className="text-lg font-medium text-foreground">Listening…</p>
+              {/* Elapsed against the ceiling, so the number means something
+                  without having to remember what the limit is. */}
               <p className={`text-sm tabular-nums ${
                 elapsed >= MAX_RECORDING_SECONDS - 60 ? "text-destructive" : "text-muted-foreground"
               }`}>
                 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
+                <span className="text-muted-foreground/60">
+                  {" / "}{MAX_RECORDING_SECONDS / 60}:00
+                </span>
                 {elapsed >= MAX_RECORDING_SECONDS - 60 && (
-                  <span className="block text-xs mt-1">
-                    Stopping automatically at {MAX_RECORDING_SECONDS / 60} minutes
-                  </span>
+                  <span className="block text-xs mt-1">Stopping automatically at the limit</span>
                 )}
               </p>
             </div>

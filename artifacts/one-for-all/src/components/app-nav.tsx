@@ -25,7 +25,10 @@ export function AppNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 border-t border-border/50 bg-background/80 backdrop-blur-xl pb-safe z-40">
-      <div className="flex h-16 items-center justify-around px-2 max-w-md mx-auto w-full">
+      {/* Extra room on the right: Replit's own badge floats in the bottom-right
+          corner of a published app and sat directly on top of "More", so the
+          last item in the nav could not be tapped. */}
+      <div className="flex h-16 items-center justify-around pl-2 pr-14 max-w-md mx-auto w-full">
         {navItems.map((item) => {
           const isActive = location === item.href;
           return (

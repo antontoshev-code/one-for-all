@@ -170,21 +170,42 @@ Captured in One for All`,
 export function calendarTitleFor(text: string): string {
   let title = text.trim();
 
-  // "I need to", "трябва да", "утре трябва да" — true of every task here, so
-  // they cost characters and say nothing.
-  const openings = [
+  // Openings that say when, or that say "this is a task" — both true of
+  // everything here, so both cost characters and carry no information.
+  // Applied repeatedly, because they stack: "По някое време, утре, може би към
+  // 11.00 е хубаво да проверя маслото" opens with three of them in a row.
+  const NOISE = [
+    /^(?:утре|днес|довечера|тази вечер|тази сутрин|тази седмица)[,\s]+/iu,
     /^(?:утре|днес|довечера|тази вечер|тази сутрин)?\s*(?:трябва|искам|имам задача)\s+да\s*/iu,
     /^(?:за утре|за днес|за довечера)\s*/iu,
+    /^(?:по\s+н[яе]ко[еи]\s+време|някъде\s+към|някъде\s+около)[,\s]*/iu,
+    /^(?:може\s+би|евентуално|примерно|горе-долу|около|към)\s+/iu,
+    /^(?:и\s+)?(?:също\s+така|между\s+другото)[,\s]*/iu,
     /^(?:i\s+)?(?:need|have|want|ought)\s+to\s*/iu,
     /^(?:remember|remind me)\s+to\s*/iu,
-    /^(?:tomorrow|today|tonight|this evening|this morning),?\s*/iu,
+    /^(?:tomorrow|today|tonight|this evening|this morning)[,\s]+/iu,
+    /^(?:at\s+)?some\s+point[,\s]*/iu,
+    /^(?:maybe|possibly|roughly|around|about|sometime)[,\s]+/iu,
+    // A bare clock time left at the front once its "around" has gone.
+    /^\d{1,2}[:.]\d{2}\s*(?:ч(?:аса)?|h|am|pm)?[,\s]+/iu,
+    /^(?:в|at)\s+\d{1,2}[:.]\d{2}[,\s]+/iu,
   ];
-  for (const opening of openings) title = title.replace(opening, "");
 
-  // The first clause carries the action. Only cut there if what remains is a
-  // recognisable phrase rather than one stray word.
+  for (let pass = 0; pass < 4; pass++) {
+    const before = title;
+    for (const phrase of NOISE) title = title.replace(phrase, "");
+    if (title === before) break;
+  }
+
+  /** A clause that is only a time reference tells you nothing about the task. */
+  const isJustTime = (phrase: string) =>
+    /^(?:[\d:.\s]|ч|часа?|мин|утре|днес|довечера|сутринта|вечерта|am|pm|o'clock|tomorrow|today|tonight|morning|evening)+$/iu
+      .test(phrase.trim());
+
+  // The first clause usually carries the action — but only take it if it says
+  // something, and if enough is left to read as a phrase.
   const clause = title.split(/[,;.!?—]/)[0].trim();
-  if (clause.split(/\s+/).filter(Boolean).length >= 3) title = clause;
+  if (clause.split(/\s+/).filter(Boolean).length >= 3 && !isJustTime(clause)) title = clause;
 
   // Trim at a word boundary rather than mid-word.
   const LIMIT = 60;
