@@ -4,6 +4,8 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
+import { FREE_LIMITS, utcDay, hoursUntilReset } from "../lib/ai-quota";
+import { aiUsageTable } from "@workspace/db";
 import { db, eq, and, notDeleted, peopleTable, vocabularyTable } from "@workspace/db";
 import {
   correctTranscript, stripLeadingFiller,
@@ -726,6 +728,41 @@ Due times: when a task states when it happens, return it as dueAt — AND LEAVE 
 
 // ── GET /ai/status ────────────────────────────────────────────────────────
 // Returns which AI providers are configured (without revealing keys).
+
+/**
+ * GET /ai/usage — how much of today's allowance is left.
+ *
+ * The limit was invisible until it stopped you: a capture would simply refuse
+ * to be organised, with a message that read like a fault. Someone about to
+ * record their day should be able to see they have two captures left before
+ * they find out the hard way.
+ */
+router.get("/ai/usage", async (req, res) => {
+  try {
+    const [row] = await db
+      .select({ requests: aiUsageTable.requests, audioBytes: aiUsageTable.audioBytes })
+      .from(aiUsageTable)
+      .where(and(eq(aiUsageTable.userId, req.userId), eq(aiUsageTable.day, utcDay(new Date()))));
+
+    const used = row ?? { requests: 0, audioBytes: 0 };
+
+    // Minutes rather than bytes: nobody thinks about their diary in megabytes.
+    // The same 0.6MB-per-minute estimate the limit itself is built on.
+    const bytesPerMinute = 0.6 * 1024 * 1024;
+
+    res.json({
+      requests: { used: used.requests, limit: FREE_LIMITS.requests },
+      voiceMinutes: {
+        used: Math.round((used.audioBytes / bytesPerMinute) * 10) / 10,
+        limit: Math.round(FREE_LIMITS.audioBytes / bytesPerMinute),
+      },
+      resetsInHours: hoursUntilReset(new Date()),
+    });
+  } catch (err) {
+    logger.error({ err }, "Failed to read AI usage");
+    res.status(500).json({ error: "Could not read your usage" });
+  }
+});
 
 router.get("/ai/status", (_req, res) => {
   res.json({

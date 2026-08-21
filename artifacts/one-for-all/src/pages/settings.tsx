@@ -5,7 +5,7 @@ import { signOut, getSession, type AuthUser } from "@/lib/auth-client";
 import {
   Trash2, AlertTriangle, Info, Loader2, Download,
   Shield, Mic, Sparkles, CheckCircle2, XCircle,
-  Palette, Sun, Moon, Monitor, LogOut, UserX, BookOpen,
+  Palette, Sun, Moon, Monitor, LogOut, UserX, BookOpen, Gauge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,6 +91,91 @@ function AppearanceSection() {
           );
         })}
       </div>
+    </section>
+  );
+}
+
+// ── Daily allowance ───────────────────────────────────────────────────────
+
+interface Usage {
+  requests: { used: number; limit: number };
+  voiceMinutes: { used: number; limit: number };
+  resetsInHours: number;
+}
+
+/**
+ * Today's AI allowance, shown before it runs out.
+ *
+ * The limit was invisible until it stopped you, and then it arrived as a
+ * refusal that read like a fault. Seeing "6 of 40" costs nothing and turns a
+ * confusing failure into an expected one — and the message it replaces was the
+ * only place the app ever mentioned a limit at all.
+ */
+function AllowanceSection() {
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/ai/usage")
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(setUsage)
+      .catch(() => setFailed(true));
+  }, []);
+
+  if (failed) return null;
+
+  const bar = (used: number, limit: number) => {
+    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    return (
+      <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-destructive" : "bg-primary"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <section className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">
+      <div className="flex items-center gap-2 mb-3">
+        <Gauge className="w-5 h-5 text-primary shrink-0" />
+        <h2 className="text-base font-semibold">Today's allowance</h2>
+      </div>
+
+      {usage === null ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" /> Checking…
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className="flex items-baseline justify-between mb-1.5 text-sm">
+              <span className="text-muted-foreground">Captures organised by AI</span>
+              <span className="font-medium">
+                {usage.requests.used} of {usage.requests.limit}
+              </span>
+            </div>
+            {bar(usage.requests.used, usage.requests.limit)}
+          </div>
+
+          <div>
+            <div className="flex items-baseline justify-between mb-1.5 text-sm">
+              <span className="text-muted-foreground">Voice transcribed</span>
+              <span className="font-medium">
+                {usage.voiceMinutes.used} of {usage.voiceMinutes.limit} min
+              </span>
+            </div>
+            {bar(usage.voiceMinutes.used, usage.voiceMinutes.limit)}
+          </div>
+
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Resets in about {usage.resetsInHours} hour{usage.resetsInHours === 1 ? "" : "s"}.
+            Reaching a limit never costs you a capture — recordings and text still
+            save, they just are not sorted automatically until it resets.
+          </p>
+        </div>
+      )}
     </section>
   );
 }
@@ -493,6 +578,9 @@ export default function Settings() {
             the resulting text is saved.
           </p>
         </section>
+
+        {/* ── Daily allowance ─────────────────────────────────────────────── */}
+        <AllowanceSection />
 
         {/* ── Learned vocabulary ──────────────────────────────────────────── */}
         <VocabularySection />
