@@ -63,7 +63,7 @@ function foldLine(line: string): string {
 }
 
 export interface CalendarEvent {
-  /** Used as the event title. */
+  /** The full thought. Shortened for the title, kept whole in the description. */
   title: string;
   start: Date;
   /** Defaults to one hour, which is a reasonable guess for a diary task. */
@@ -75,11 +75,9 @@ export interface CalendarEvent {
 export function buildIcs(event: CalendarEvent): string {
   const end = new Date(event.start.getTime() + (event.durationMinutes ?? 60) * 60_000);
 
-  // A title long enough to be its own paragraph makes a useless calendar entry,
-  // so it is trimmed for the summary and kept whole in the description.
-  const summary = event.title.length > 70
-    ? `${event.title.slice(0, 67).trimEnd()}…`
-    : event.title;
+  // A paragraph makes a useless calendar entry, so the summary is the short
+  // form and the description keeps every word.
+  const summary = calendarTitleFor(event.title);
 
   const lines = [
     "BEGIN:VCALENDAR",
@@ -144,10 +142,60 @@ export function googleCalendarUrl(event: CalendarEvent): string {
 
   const params = new URLSearchParams({
     action: "TEMPLATE",
-    text: event.title.slice(0, 200),
+    text: calendarTitleFor(event.title),
     dates: `${stamp(event.start)}/${stamp(end)}`,
-    details: "Added from One for All",
+    // The thought as it was captured, labelled, so the calendar entry says
+    // where it came from and the short title never loses the detail.
+    details: `${event.title}
+
+Captured in One for All`,
   });
 
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+/**
+ * A short, scannable title for a calendar entry.
+ *
+ * The whole thought was being used as the event name, which in a week view is
+ * a wall of text truncated mid-sentence. Google keeps summary and description
+ * apart for exactly this reason: the title is what you scan, the description is
+ * where the detail lives.
+ *
+ * Built from the person's own words rather than generated. A title they did not
+ * write, appearing in their calendar next to real appointments, is a small lie
+ * about what they said — and the leading obligation phrase is the part carrying
+ * no information anyway, since everything here is something they need to do.
+ */
+export function calendarTitleFor(text: string): string {
+  let title = text.trim();
+
+  // "I need to", "трябва да", "утре трябва да" — true of every task here, so
+  // they cost characters and say nothing.
+  const openings = [
+    /^(?:утре|днес|довечера|тази вечер|тази сутрин)?\s*(?:трябва|искам|имам задача)\s+да\s*/iu,
+    /^(?:за утре|за днес|за довечера)\s*/iu,
+    /^(?:i\s+)?(?:need|have|want|ought)\s+to\s*/iu,
+    /^(?:remember|remind me)\s+to\s*/iu,
+    /^(?:tomorrow|today|tonight|this evening|this morning),?\s*/iu,
+  ];
+  for (const opening of openings) title = title.replace(opening, "");
+
+  // The first clause carries the action. Only cut there if what remains is a
+  // recognisable phrase rather than one stray word.
+  const clause = title.split(/[,;.!?—]/)[0].trim();
+  if (clause.split(/\s+/).filter(Boolean).length >= 3) title = clause;
+
+  // Trim at a word boundary rather than mid-word.
+  const LIMIT = 60;
+  if (title.length > LIMIT) {
+    const cut = title.slice(0, LIMIT);
+    const lastSpace = cut.lastIndexOf(" ");
+    title = (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd() + "…";
+  }
+
+  title = title.trim();
+  if (!title) return "Task";
+
+  return title.charAt(0).toLocaleUpperCase() + title.slice(1);
 }

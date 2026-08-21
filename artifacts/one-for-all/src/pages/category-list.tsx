@@ -53,6 +53,19 @@ interface CategoryListProps {
 
 // ── Component ─────────────────────────────────────────────────────────────
 
+/**
+ * A Date as the value a datetime-local input expects.
+ *
+ * That input has no concept of a timezone: it reads and writes wall-clock time.
+ * Handing it an ISO string in UTC shifts every task by the offset, so a task at
+ * 21:20 in Sofia shows as 18:20 and saving it moves the task three hours.
+ */
+function toLocalInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export default function CategoryList({ category, title, description }: CategoryListProps) {
   const { data: entries, isLoading, isError, refetch } = useListEntries({ category });
   const updateEntry = useUpdateEntry();
@@ -102,6 +115,22 @@ export default function CategoryList({ category, title, description }: CategoryL
         },
       },
     );
+  };
+
+  /** Set or clear a task's due time. Failure leaves the old time in place. */
+  const setDue = async (id: number, due: Date | null) => {
+    try {
+      const res = await fetch(`/api/entries/${id}/due`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueAt: due ? due.toISOString() : null }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await refreshLists();
+    } catch (err) {
+      console.error("Failed to change the due time", err);
+      toast({ title: "Could not change the time", description: "Please try again." });
+    }
   };
 
   const refreshLists = () => Promise.all([
@@ -298,14 +327,33 @@ export default function CategoryList({ category, title, description }: CategoryL
                         the page is open — which at 21:20 it will not be. */}
                     {dueAt && (
                       <div className="flex items-center justify-between gap-2 mt-3">
-                        <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full ${
+                        {/* Editable: "at 8 or 8:30" was heard as 8:00 and
+                            locked there, with no way to correct it short of
+                            deleting the task. A guessed time has to be a
+                            starting point, not a decision. */}
+                        <label className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full cursor-pointer ${
                           isOverdue
                             ? "bg-destructive/10 text-destructive"
                             : "bg-secondary text-secondary-foreground"
                         }`}>
                           <Clock className="w-3 h-3" />
                           {formatDueDate(dueAt)}
-                        </span>
+                          <input
+                            type="datetime-local"
+                            // Rendered as a local value: the input has no
+                            // timezone, and handing it a UTC string moves every
+                            // task by the offset.
+                            value={toLocalInputValue(dueAt)}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => {
+                              e.stopPropagation();
+                              const next = e.target.value ? new Date(e.target.value) : null;
+                              void setDue(entry.id, next);
+                            }}
+                            className="sr-only"
+                            aria-label="Change when this is due"
+                          />
+                        </label>
                         {!isDone && (
                           <Popover>
                             <PopoverTrigger asChild>
