@@ -61,6 +61,32 @@ export default function Home() {
    * there telling us.
    */
   const [originalTranscript, setOriginalTranscript] = useState("");
+
+  /**
+   * The longest a single capture may run.
+   *
+   * Ten minutes is far longer than a diary thought and still well inside the
+   * upload cap, so it never truncates something someone meant to say. It exists
+   * for the pocket case, not to ration anybody.
+   */
+  const MAX_RECORDING_SECONDS = 10 * 60;
+
+  // Tick while recording, and stop by itself at the ceiling rather than
+  // discovering it at the point of upload.
+  useEffect(() => {
+    if (mode !== "recording") { setElapsed(0); return; }
+
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - started) / 1000);
+      setElapsed(seconds);
+      if (seconds >= MAX_RECORDING_SECONDS) handleStopRecording();
+    }, 1000);
+
+    return () => clearInterval(timer);
+    // handleStopRecording is stable for the life of the component.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
@@ -71,6 +97,16 @@ export default function Home() {
   const submittingRef = useRef(false);
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
+
+  /**
+   * How long the current recording has been running.
+   *
+   * There was no clock at all: a phone left recording in a pocket produced a
+   * file the size of the day, and the person had no idea until the limit
+   * refused it. Whisper is billed per minute, so this is a cost as well as a
+   * usability problem.
+   */
+  const [elapsed, setElapsed] = useState(0);
   const audioChunks = useRef<Blob[]>([]);
   const webSpeechRef = useRef<WebSpeechRecognition | null>(null);
   // Set to true when Web Speech produces a non-empty transcript — tells
@@ -415,6 +451,14 @@ export default function Home() {
               <PenLine className="w-5 h-5 mr-2" />
               Write instead
             </Button>
+
+            {/* Said here rather than in Settings, because it only matters in the
+                two seconds before someone starts talking. Most transcription
+                mistakes are a phone held at arm's length in the wind. */}
+            <p className="text-xs text-muted-foreground text-center max-w-[240px] leading-relaxed">
+              Speak clearly and hold the phone close — it makes a real difference
+              to how well your words come back.
+            </p>
           </div>
         )}
 
@@ -425,7 +469,17 @@ export default function Home() {
                 <div className="absolute inset-0 rounded-full border-4 border-destructive/30 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]" />
                 <Mic className="w-10 h-10 animate-pulse" />
               </div>
-              <p className="text-lg font-medium text-foreground">Listening...</p>
+              <p className="text-lg font-medium text-foreground">Listening…</p>
+              <p className={`text-sm tabular-nums ${
+                elapsed >= MAX_RECORDING_SECONDS - 60 ? "text-destructive" : "text-muted-foreground"
+              }`}>
+                {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
+                {elapsed >= MAX_RECORDING_SECONDS - 60 && (
+                  <span className="block text-xs mt-1">
+                    Stopping automatically at {MAX_RECORDING_SECONDS / 60} minutes
+                  </span>
+                )}
+              </p>
             </div>
 
             <button

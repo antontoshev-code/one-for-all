@@ -312,7 +312,16 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
    * as though it were the whole. Naming both is honest about why the app is
    * offering to split it.
    */
-  const partCategories = [...new Set(groupIntoUnits(entry.content ?? "").map(u => u.category))];
+  const partCategories = (() => {
+    const counts = new Map<Category, number>();
+    for (const unit of groupIntoUnits(entry.content ?? "")) {
+      counts.set(unit.category, (counts.get(unit.category) ?? 0) + 1);
+    }
+    // Counted, not just listed: "3 tasks" tells you more about what splitting
+    // will produce than "task" does, and a capture with three things to do
+    // deserves to say so.
+    return [...counts.entries()].map(([category, count]) => ({ category, count }));
+  })();
   const looksMultiPart = partCategories.length > 1;
 
   /**
@@ -828,10 +837,12 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
               Looks like{" "}
               {partCategories.length > 1 ? (
                 <>
-                  {partCategories.map((cat, i) => (
-                    <span key={cat}>
+                  {partCategories.map(({ category, count }, i) => (
+                    <span key={category}>
                       {i > 0 && <span className="text-muted-foreground"> &amp; </span>}
-                      <span className="capitalize font-semibold text-primary">{cat}</span>
+                      <span className="capitalize font-semibold text-primary">
+                        {count > 1 ? `${count} ${category}s` : category}
+                      </span>
                     </span>
                   ))}
                   {" "}together

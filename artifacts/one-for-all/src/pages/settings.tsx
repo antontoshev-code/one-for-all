@@ -140,7 +140,7 @@ function AllowanceSection() {
     <section className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">
       <div className="flex items-center gap-2 mb-3">
         <Gauge className="w-5 h-5 text-primary shrink-0" />
-        <h2 className="text-base font-semibold">Today's allowance</h2>
+        <h2 className="text-base font-semibold">Your usage</h2>
       </div>
 
       {usage === null ? (
@@ -161,7 +161,7 @@ function AllowanceSection() {
 
           <div>
             <div className="flex items-baseline justify-between mb-1.5 text-sm">
-              <span className="text-muted-foreground">Voice transcribed</span>
+              <span className="text-muted-foreground">Voice minutes transcribed</span>
               <span className="font-medium">
                 {usage.voiceMinutes.used} of {usage.voiceMinutes.limit} min
               </span>
@@ -170,9 +170,17 @@ function AllowanceSection() {
           </div>
 
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Resets in about {usage.resetsInHours} hour{usage.resetsInHours === 1 ? "" : "s"}.
-            Reaching a limit never costs you a capture — recordings and text still
-            save, they just are not sorted automatically until it resets.
+            Resets in about {usage.resetsInHours} hour{usage.resetsInHours === 1 ? "" : "s"},
+            at midnight UTC.
+          </p>
+          {/* The two limits are separate and fail differently, so they say so
+              separately. "AI limit reached" leaves someone guessing which one,
+              and whether their recording survived. */}
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            <strong className="text-foreground">Reaching a limit never costs you a capture.</strong>{" "}
+            If transcription runs out, the recording is still saved and you can type
+            the words yourself. If organising runs out, the text is saved and you can
+            file it by hand. Everything stays editable and exportable either way.
           </p>
         </div>
       )}
