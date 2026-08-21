@@ -796,7 +796,20 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
                 key={i}
                 piece={piece}
                 onToggleAccepted={() => updatePiece(i, { accepted: !piece.accepted })}
-                onCategoryChange={(cat) => updatePiece(i, { category: cat })}
+                onCategoryChange={(cat) => {
+                  if (cat !== piece.category) {
+                    void fetch('/api/ai/category-feedback', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        text: piece.text,
+                        suggested: piece.category,
+                        chosen: cat,
+                      }),
+                    }).catch(err => console.warn('[category] feedback failed', err));
+                  }
+                  updatePiece(i, { category: cat });
+                }}
                 allPeople={people ?? []}
                 onUpdateName={(nameIndex, patch) => setSplitPieces(prev => prev.map((p, idx) => idx === i
                   ? { ...p, names: p.names.map((n, ni) => ni === nameIndex ? { ...n, ...patch } : n) }
@@ -891,6 +904,19 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
                 disabled={isProcessing}
                 onClick={() => {
                   logEvent('suggestion_rejected', { suggested: suggestedCat, chosen: cat, entryId: entry.id });
+                  // The most useful signal there is about how this person sorts
+                  // their own life, and it used to be discarded. Where the line
+                  // falls between a task and a reflection is partly a matter of
+                  // how somebody thinks, so their corrections are fed back.
+                  void fetch('/api/ai/category-feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      text: entry.content,
+                      suggested: suggestedCat,
+                      chosen: cat,
+                    }),
+                  }).catch(err => console.warn('[category] feedback failed', err));
                   handleProcess(cat);
                   setIsChangingCat(false);
                 }}

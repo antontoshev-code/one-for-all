@@ -31,6 +31,7 @@ const INTENTIONALLY_UNDOCUMENTED: Record<string, string> = {
   "post /ai/split": "AI helper, called directly and tolerant of failure by design",
   "get /ai/status": "diagnostic surface for Settings, not part of the data contract",
   "get /ai/usage": "diagnostic surface for Settings, not part of the data contract",
+  "post /ai/category-feedback": "AI helper; records a correction and is tolerant of failure by design",
   "get /": "platform healthcheck probe, not an application endpoint",
 };
 

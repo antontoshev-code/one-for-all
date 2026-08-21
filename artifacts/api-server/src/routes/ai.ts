@@ -6,7 +6,7 @@ import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 import { FREE_LIMITS, utcDay, hoursUntilReset } from "../lib/ai-quota";
 import { composeDue } from "../lib/due-time";
-import { aiUsageTable } from "@workspace/db";
+import { aiUsageTable, categoryFeedbackTable, desc } from "@workspace/db";
 import { db, eq, and, notDeleted, peopleTable, vocabularyTable } from "@workspace/db";
 import {
   correctTranscript, stripLeadingFiller,
@@ -483,7 +483,7 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
 - idea: creative thoughts, concepts, what-if proposals, something to build, explore, or try
 - log: ONLY body / health / physical tracking — workouts, sleep, eating, physical symptoms, pain, medication, weight, heart rate; do NOT use log for general activities like "went to a store" or "spent time outside"
 
-TENSE IS DECISIVE between journal and task. A task has not happened yet. "I sorted out the support ticket and opened a case" is journal — it is done, the user is recounting it. "I need to prepare the tea before we leave" is a task — it is still ahead of them. Past tense is never a task however action-like the verbs are; a completed action recounted is the diary.
+TENSE IS DECISIVE between journal and task. A task has not happened yet. "I sorted out the support ticket and opened a case" is journal — it is done, the user is recounting it. "I need to prepare the tea before we leave" is a task — it is still ahead of them. Past tense is never a task however action-like the verbs are; a completed action recounted is the diary.${await categoryExamples(req.userId)}
 
 Due times: when a task says which day — "tonight", "утре", "Wednesday" — resolve it against the current time below and return the calendar date in dueDates as YYYY-MM-DD. Do NOT convert to UTC and do NOT compute an offset; just say which day they meant.
 
@@ -771,7 +771,7 @@ Categories:
 - idea: a concept or possibility they are exploring or want to build.
 - log: body, health, workouts, sleep, food, physical sensations ONLY — not general daily narration.
 
-People: extract the human beings named in each unit, exactly as written. Shops, apps, brands, companies and places are NOT people — Temu, Trello, Sofia are not names to return.
+People: extract the human beings named in each unit, exactly as written. Shops, apps, brands, companies and places are NOT people — Temu, Trello, Sofia are not names to return.${await categoryExamples(req.userId)}
 
 Due times: when a task says when it happens, report the date and time separately — AND LEAVE THE WORDS IN THE TEXT. "I need to check back on the app later today at 9pm" becomes text "Check back on the app later today at 9pm" with dueDate and dueTime set, not text "Check back on the app." The date is for the calendar; the sentence is what the person said, and cutting half of it away loses the only version they would recognise.
 
@@ -873,6 +873,90 @@ router.get("/ai/usage", async (req, res) => {
     res.status(500).json({ error: "Could not read your usage" });
   }
 });
+
+/** How much of a capture is kept as an example. Enough to show the shape. */
+const FEEDBACK_TEXT_LIMIT = 240;
+
+/** How many corrections are fed back. Enough to teach, short enough to afford. */
+const FEEDBACK_EXAMPLES = 6;
+
+/**
+ * POST /ai/category-feedback — record that the user chose a different category.
+ *
+ * The single most useful signal available about how this person sorts their own
+ * life, and it was being thrown away every time they pressed Change.
+ */
+router.post("/ai/category-feedback", async (req, res) => {
+  const { text, suggested, chosen } = req.body as {
+    text?: string; suggested?: string; chosen?: string;
+  };
+
+  const valid = (c: unknown): c is Category =>
+    typeof c === "string" && VALID_CATEGORIES.includes(c as Category);
+
+  if (typeof text !== "string" || !text.trim() || !valid(suggested) || !valid(chosen)) {
+    res.status(400).json({ error: "text, suggested and chosen are required" });
+    return;
+  }
+
+  // Agreeing is not feedback. Only a disagreement says anything.
+  if (suggested === chosen) {
+    res.json({ recorded: false });
+    return;
+  }
+
+  try {
+    await db.insert(categoryFeedbackTable).values({
+      userId: req.userId,
+      text: text.trim().slice(0, FEEDBACK_TEXT_LIMIT),
+      suggested,
+      chosen,
+    });
+    // Count only: the text is the user's own writing, and the privacy page says
+    // logs never hold it.
+    logger.info({ userId: req.userId }, "Recorded a category correction");
+    res.json({ recorded: true });
+  } catch (err) {
+    // Learning is an improvement, never a requirement.
+    logger.error({ err }, "Failed to record category feedback");
+    res.json({ recorded: false });
+  }
+});
+
+/**
+ * The user's recent corrections, phrased as examples for the model.
+ *
+ * Their own decisions carry more weight than any rule written in advance,
+ * because where the line falls between a task and a reflection is partly a
+ * matter of how a particular person thinks about their own life.
+ */
+async function categoryExamples(userId: string): Promise<string> {
+  try {
+    const rows = await db
+      .select({
+        text: categoryFeedbackTable.text,
+        suggested: categoryFeedbackTable.suggested,
+        chosen: categoryFeedbackTable.chosen,
+      })
+      .from(categoryFeedbackTable)
+      .where(eq(categoryFeedbackTable.userId, userId))
+      .orderBy(desc(categoryFeedbackTable.createdAt))
+      .limit(FEEDBACK_EXAMPLES);
+
+    if (rows.length === 0) return "";
+
+    const lines = rows.map(r => `- "${r.text}" is ${r.chosen}, not ${r.suggested}.`);
+    return [
+      "",
+      "",
+      "This user has corrected these before. Follow their judgement:",
+      ...lines,
+    ].join("\n");
+  } catch (err) {
+    logger.warn({ err }, "Could not load category corrections");
+    return "";
+  }
+}
 
 router.get("/ai/status", (_req, res) => {
   res.json({
