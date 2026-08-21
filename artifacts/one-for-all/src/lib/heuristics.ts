@@ -60,6 +60,13 @@ export function categorizeContent(text: string): Category {
     "heart rate", "pulse", "blood pressure", "steps taken",
     "headache", "stomachache", "pain", "sore", "ache", "symptom", "sick", "fever", "nausea",
     "medication", "vitamins", "supplements",
+    // Strength-training vocabulary. "I did my standard calisthenics protocol
+    // and 45 kg bench press 3 sets" had one hit in thirteen words and read as
+    // narrative, so a plainly physical note was filed as a diary entry and
+    // then offered for splitting away from its own first sentence.
+    "calisthenics", "sets", "set of", "kg", "bodyweight", "cardio", "stretching",
+    "plank", "burpees", "lunges", "curls", "press", "rows", "dips", "chin-up",
+    "warm up", "warmed up", "cool down", "protocol", "circuit", "interval",
     "physical", "health", "body", "muscle", "felt great", "felt tired", "energy",
     // Bulgarian
     "тренирах", "тренировка", "тренирам", "фитнес", "бягах", "бягане",

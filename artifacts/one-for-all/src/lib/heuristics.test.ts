@@ -212,3 +212,29 @@ describe("categorizeContent in Bulgarian", () => {
     assert.equal(categorizeContent("Had a great workout this morning, felt great"), "log");
   });
 });
+
+describe("workout notes stay whole", () => {
+  test("a two-sentence workout note is one log entry", () => {
+    // This was offered for splitting: the first sentence read as log, the
+    // second as journal, so the app proposed cutting a workout note in half.
+    const note = "Had a great workout this evening — felt great. " +
+      "I did my standard short calisthenics protocol and 45 kg bench press 3 sets.";
+    const units = groupIntoUnits(note);
+    assert.equal(units.length, 1);
+    assert.equal(units[0].category, "log");
+  });
+
+  test("the second sentence alone is still a log", () => {
+    assert.equal(
+      categorizeContent("I did my standard short calisthenics protocol and 45 kg bench press 3 sets."),
+      "log",
+    );
+  });
+
+  test("it is not offered for splitting", () => {
+    assert.equal(
+      looksWorthSplitting("Had a great workout this evening — felt great. I did 45 kg bench press 3 sets."),
+      false,
+    );
+  });
+});

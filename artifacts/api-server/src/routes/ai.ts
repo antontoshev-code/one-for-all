@@ -55,6 +55,13 @@ const LOG_WORDS = [
   "weight ", "weighed", "bmi", "heart rate", "pulse", "blood pressure", "steps taken",
   "headache", "stomachache", "pain", "sore", "symptom", "sick", "fever", "nausea",
   "medication", "vitamins", "supplements",
+    // Strength-training vocabulary. "I did my standard calisthenics protocol
+    // and 45 kg bench press 3 sets" had one hit in thirteen words and read as
+    // narrative, so a plainly physical note was filed as a diary entry and
+    // then offered for splitting away from its own first sentence.
+    "calisthenics", "sets", "set of", "kg", "bodyweight", "cardio", "stretching",
+    "plank", "burpees", "lunges", "curls", "press", "rows", "dips", "chin-up",
+    "warm up", "warmed up", "cool down", "protocol", "circuit", "interval",
   "тренирах", "тренировка", "тренирам", "фитнес", "бягах", "бягане", "плувах",
   "лицеви", "коремни", "клекове", "набирания", "щанга", "серии", "повторения",
   "кардио", "спах", "не спах", "събудих се", "умора", "изтощен", "енергия",
@@ -562,7 +569,7 @@ router.post("/ai/split", aiQuota, async (req, res) => {
                     text: {
                       type: "string",
                       description:
-                        "The text of this thought unit. Lightly clean spoken filler (\"you know\", \"hmm\", \"okay so\") and add sentence-ending punctuation if missing — but NEVER invent, summarise, or drop any substantive meaning.",
+                        "The text of this thought unit, IN THE SAME LANGUAGE THE USER SPOKE. Never translate. Lightly clean spoken filler (\"you know\", \"hmm\", \"okay so\") and add sentence-ending punctuation if missing — but NEVER invent, summarise, or drop any substantive meaning.",
                     },
                     category: {
                       type: "string",
@@ -590,6 +597,8 @@ router.post("/ai/split", aiQuota, async (req, res) => {
       ],
       tool_choice: { type: "tool", name: "return_thought_units" },
       system: `You are processing a personal diary capture. Decide whether it needs splitting at all, and split only where it genuinely helps.
+
+WRITE BACK IN THE USER'S OWN LANGUAGE. These instructions are in English; the capture may not be. A Bulgarian capture must come back in Bulgarian, word for word as they said it. Never translate, and never paraphrase into English — this is somebody's diary, and returning it in a language they did not write it in replaces their voice with yours. If the capture mixes languages, keep the mixture exactly as it is.
 
 DEFAULT TO ONE UNIT. Most captures are one entry. Splitting is the exception, not the goal, and returning one unit is a correct and common answer.
 

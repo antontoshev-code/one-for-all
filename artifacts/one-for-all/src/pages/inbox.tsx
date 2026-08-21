@@ -82,6 +82,106 @@ function asPieceNames(detections: NameDetectionResult[]): PieceName[] {
 }
 
 /**
+ * Pick somebody already in People.
+ *
+ * Detection only ever offered to CREATE a person: if it did not recognise the
+ * name — a nickname, a spelling it had not seen, a person mentioned as "she" —
+ * there was no way to attach the entry to a profile that already existed, and
+ * the only route out was to create a duplicate.
+ *
+ * Descriptors are shown, because that is exactly what they are for. Two people
+ * called Petya are indistinguishable in a list of names.
+ */
+function PersonPicker({
+  people,
+  exclude,
+  onPick,
+  label = "Link someone else",
+}: {
+  people: { id: number; name: string; descriptor?: string | null }[];
+  exclude: Set<number>;
+  onPick: (person: { id: number; name: string; descriptor?: string | null }) => void;
+  label?: string;
+}) {
+  const [search, setSearch] = useState("");
+  const available = people.filter(p => !exclude.has(p.id));
+  if (available.length === 0) return null;
+
+  const shown = available.filter(p =>
+    `${p.name} ${p.descriptor ?? ""}`.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1">
+          <UserPlus className="w-3 h-3" />
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-3 rounded-2xl">
+        {available.length > 6 && (
+          <Input
+            autoFocus
+            placeholder="Search people…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="h-8 text-sm rounded-xl mb-2"
+          />
+        )}
+        <div className="flex flex-col gap-1 max-h-52 overflow-y-auto">
+          {shown.length === 0 ? (
+            <p className="text-xs text-muted-foreground px-1 py-2">Nobody matches that.</p>
+          ) : shown.map(person => (
+            <button
+              key={person.id}
+              onClick={() => { onPick(person); setSearch(""); }}
+              className="text-left text-sm px-2 py-1.5 rounded-lg hover:bg-secondary transition-colors truncate"
+            >
+              {person.name}
+              {person.descriptor && (
+                <span className="text-muted-foreground"> ({person.descriptor})</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * Re-apply choices the user already made on the capture card.
+ *
+ * The split screen rebuilds its names from scratch, so pressing Add on the card
+ * and then Split threw the decision away — which from the outside is
+ * indistinguishable from Add not working. Matched by the name itself rather
+ * than by position, since the pieces are not the same shape as the card.
+ */
+function carryOverDecisions(fresh: PieceName[], decided: PieceName[]): PieceName[] {
+  const label = (n: PieceName) =>
+    (n.detection.suggestedName
+      ?? n.detection.matchedPerson?.name
+      ?? n.detection.matchedPeople?.[0]?.name
+      ?? "").toLowerCase();
+
+  const byName = new Map(
+    decided.filter(n => n.addAsNew || n.linkedPersonId).map(n => [label(n), n]),
+  );
+
+  return fresh.map(name => {
+    const previous = byName.get(label(name));
+    if (!previous) return name;
+    return {
+      ...name,
+      linkedPersonId: previous.linkedPersonId,
+      addAsNew: previous.addAsNew,
+      descriptor: previous.descriptor,
+    };
+  });
+}
+
+/**
  * Turn the names Claude found into detections, matching each against the
  * people already known. Names Claude returns are deduplicated case-insensitively
  * so "Петя" twice in one sentence asks once.
@@ -182,6 +282,8 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
   const [localSuggestedCat, setLocalSuggestedCat] = useState<Category | null>(null);
   // Skip state
   const [isSkipped, setIsSkipped] = useState(false);
+  /** Covers creating people as well as the update — both happen on Accept. */
+  const [isProcessing, setIsProcessing] = useState(false);
 
   /**
    * Names found in the capture as a whole.
@@ -311,10 +413,29 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
     }
   };
 
+  /**
+   * File the capture, after creating and linking anyone the user chose.
+   *
+   * Both Accept and "Keep it as one" reported nothing at all — no spinner while
+   * people were being created, and complete silence if the update failed. From
+   * the outside that is indistinguishable from the button not being wired up,
+   * which is exactly how it was described.
+   */
   const handleProcess = async (category: Category | 'inbox') => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+
     await applyCaptureNames();
 
     updateEntry.mutate({ id: entry.id, data: { category } }, {
+      onError: err => {
+        console.error("Failed to file the capture", err);
+        setIsProcessing(false);
+        toast({
+          title: "Could not file this capture",
+          description: "It is still here — please try again.",
+        });
+      },
       onSuccess: () => {
         // Record for History (fire-and-forget — not on critical path)
         if (category !== 'inbox') {
@@ -371,7 +492,10 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
         text: unit.text,
         category: unit.category,
         accepted: true,
-        names: asPieceNames(detectNamesInChunk(unit.text, people || [])),
+        names: carryOverDecisions(
+          asPieceNames(detectNamesInChunk(unit.text, people || [])),
+          captureNames,
+        ),
         // No model, so nothing to read a date out of a sentence with.
         dueAt: null,
       }));
@@ -411,7 +535,10 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
           text: unit.text,
           category: unit.category as Category,
           accepted: true,
-          names: asPieceNames(detections),
+          // Decisions already made on the card are kept. Pressing Add and then
+          // Split silently discarded the choice, which read as Add doing
+          // nothing at all.
+          names: carryOverDecisions(asPieceNames(detections), captureNames),
           dueAt: unit.dueAt ?? null,
         };
       });
@@ -580,8 +707,13 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
                 piece={piece}
                 onToggleAccepted={() => updatePiece(i, { accepted: !piece.accepted })}
                 onCategoryChange={(cat) => updatePiece(i, { category: cat })}
+                allPeople={people ?? []}
                 onUpdateName={(nameIndex, patch) => setSplitPieces(prev => prev.map((p, idx) => idx === i
                   ? { ...p, names: p.names.map((n, ni) => ni === nameIndex ? { ...n, ...patch } : n) }
+                  : p
+                ))}
+                onAddName={name => setSplitPieces(prev => prev.map((p, idx) => idx === i
+                  ? { ...p, names: [...p.names, name] }
                   : p
                 ))}
               />
@@ -666,6 +798,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
               <button
                 key={cat}
                 className="flex flex-col items-start text-left rounded-2xl bg-card border border-border/50 px-3 py-2.5 hover:bg-accent/40 active:bg-accent/60 transition-colors"
+                disabled={isProcessing}
                 onClick={() => {
                   logEvent('suggestion_rejected', { suggested: suggestedCat, chosen: cat, entryId: entry.id });
                   handleProcess(cat);
@@ -759,6 +892,13 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
                           {name.addAsNew ? 'Undo' : 'Add'}
                         </button>
                       </div>
+                      {name.addAsNew && (
+                        <p className="flex items-center gap-1.5 text-[11px] text-primary mt-1.5">
+                          <Check className="w-3 h-3" />
+                          Will be added when you save
+                        </p>
+                      )}
+
                       {(name.addAsNew || name.descriptor) && (
                         <Input
                           placeholder="Short label (optional): 'Studentina', 'climbing gym'…"
@@ -773,7 +913,34 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
                 return null;
               })}
+
+              <PersonPicker
+                people={people ?? []}
+                exclude={new Set(captureNames.map(n => n.linkedPersonId).filter((id): id is number => id !== null))}
+                onPick={person => setCaptureNames(prev => [...prev, {
+                  detection: { matchedPerson: person },
+                  linkedPersonId: person.id,
+                  addAsNew: false,
+                  descriptor: '',
+                }])}
+              />
             </div>
+          )}
+
+          {/* Nothing was detected, but somebody may still be in this capture —
+              a nickname, a spelling the app has not seen, or "she". */}
+          {captureNames.length === 0 && !isSkipped && (people?.length ?? 0) > 0 && (
+            <PersonPicker
+              people={people ?? []}
+              exclude={new Set()}
+              label="Link a person"
+              onPick={person => setCaptureNames([{
+                detection: { matchedPerson: person },
+                linkedPersonId: person.id,
+                addAsNew: false,
+                descriptor: '',
+              }])}
+            />
           )}
 
           {isSkipped ? (
@@ -804,11 +971,13 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
               ) : (
                 <Button
                   className="flex-1 rounded-full bg-foreground text-background hover:bg-foreground/90 h-10"
+                  disabled={isProcessing}
                   onClick={() => {
                     logEvent('suggestion_accepted', { category: suggestedCat, entryId: entry.id });
                     handleProcess(suggestedCat as Category);
                   }}
                 >
+                  {isProcessing && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                   Accept
                 </Button>
               )}
@@ -831,12 +1000,14 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
 
           {looksMultiPart ? (
             <button
+              disabled={isProcessing}
               onClick={() => {
                 logEvent('suggestion_accepted', { category: suggestedCat, entryId: entry.id });
                 handleProcess(suggestedCat as Category);
               }}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+              className="inline-flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 disabled:opacity-50"
             >
+              {isProcessing && <Loader2 className="w-3 h-3 animate-spin" />}
               Keep it as one {suggestedCat} entry
             </button>
           ) : (
@@ -974,6 +1145,9 @@ interface SplitPieceCardProps {
   onToggleAccepted: () => void;
   onCategoryChange: (cat: Category) => void;
   onUpdateName: (nameIndex: number, patch: Partial<PieceName>) => void;
+  onAddName: (name: PieceName) => void;
+  /** For the picker — the card cannot reach the people query from here. */
+  allPeople: { id: number; name: string; descriptor?: string | null }[];
 }
 
 function SplitPieceCard({
@@ -981,6 +1155,8 @@ function SplitPieceCard({
   onToggleAccepted,
   onCategoryChange,
   onUpdateName,
+  onAddName,
+  allPeople,
 }: SplitPieceCardProps) {
   const categories: Category[] = ['journal', 'task', 'idea', 'log'];
 
@@ -1127,6 +1303,13 @@ function SplitPieceCard({
                 </button>
               </div>
 
+              {name.addAsNew && (
+                <p className="flex items-center gap-1.5 text-[11px] text-primary mt-1.5">
+                  <Check className="w-3 h-3" />
+                  Will be added when you save
+                </p>
+              )}
+
               {/* The label input stays mounted once anything has been typed, so
                   pressing Undo and changing your mind doesn't lose the text —
                   it reads as discarded otherwise, with no way back to it. */}
@@ -1150,6 +1333,18 @@ function SplitPieceCard({
 
         return null;
       })}
+
+      <PersonPicker
+        people={allPeople}
+        exclude={new Set(piece.names.map(n => n.linkedPersonId).filter((id): id is number => id !== null))}
+        label={piece.names.length > 0 ? "Link someone else" : "Link a person"}
+        onPick={person => onAddName({
+          detection: { matchedPerson: person },
+          linkedPersonId: person.id,
+          addAsNew: false,
+          descriptor: '',
+        })}
+      />
 
     </div>
   );

@@ -189,9 +189,11 @@ function AliasEditor({
         variants — adding them here means a mention is recognised however it's written.
       </p>
       <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-        Add as many as you like — type one and press <kbd className="px-1 py-0.5 rounded bg-secondary text-foreground text-[10px]">Enter</kbd>,
-        then type the next. For example <span className="text-foreground">Петя</span>,{" "}
-        <span className="text-foreground">Petya</span>, <span className="text-foreground">Pepi</span>.
+        Add as many as you like. Press{" "}
+        <kbd className="px-1 py-0.5 rounded bg-secondary text-foreground text-[10px]">Enter</kbd>{" "}
+        or type a <strong className="text-foreground">comma</strong> after each one — or paste a
+        whole list at once. For example{" "}
+        <span className="text-foreground">Петя, Petya, Pepi</span>.
       </p>
 
       {aliases.length > 0 && (
