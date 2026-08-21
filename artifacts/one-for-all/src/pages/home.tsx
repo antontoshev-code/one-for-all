@@ -369,6 +369,7 @@ export default function Home() {
             texts: [content],
             now: new Date().toISOString(),
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            utcOffsetMinutes: new Date().getTimezoneOffset(),
           }),
         });
         if (res.ok) {

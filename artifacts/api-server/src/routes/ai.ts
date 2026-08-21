@@ -5,6 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 import { FREE_LIMITS, utcDay, hoursUntilReset } from "../lib/ai-quota";
+import { composeDue } from "../lib/due-time";
 import { aiUsageTable } from "@workspace/db";
 import { db, eq, and, notDeleted, peopleTable, vocabularyTable } from "@workspace/db";
 import {
@@ -322,11 +323,13 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
 // Returns { categories: Category[], source: 'claude' | 'heuristic' }.
 
 router.post("/ai/categorize", aiQuota, async (req, res) => {
-  const { texts, now, timeZone } = req.body as {
+  const { texts, now, timeZone, utcOffsetMinutes } = req.body as {
     texts: string[];
     /** The client's clock. "tonight at 9pm" cannot be resolved without it. */
     now?: string;
     timeZone?: string;
+    /** As getTimezoneOffset() reports it: positive west of Greenwich. */
+    utcOffsetMinutes?: number;
   };
 
   if (!Array.isArray(texts) || texts.length === 0) {
@@ -345,6 +348,11 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
   // the model as nonsense.
   const nowIso = now && !Number.isNaN(Date.parse(now)) ? new Date(now).toISOString() : null;
   const zone = typeof timeZone === "string" && /^[\w+\-/]{1,64}$/.test(timeZone) ? timeZone : null;
+  const offsetMinutes =
+    typeof utcOffsetMinutes === "number" && Number.isFinite(utcOffsetMinutes)
+      && Math.abs(utcOffsetMinutes) <= 14 * 60
+      ? utcOffsetMinutes
+      : 0;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
@@ -380,7 +388,13 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
                 type: "array",
                 items: { type: ["string", "null"] },
                 description:
-                  "For each input, when a task states when it happens, as an ISO 8601 timestamp with the offset. Null for anything without a stated time, which is most of them — a made-up deadline is worse than no deadline.",
+                  "For each input, the calendar date as YYYY-MM-DD in the user's own local calendar when a task says which day. Null otherwise, which is most of them. Do not convert to UTC.",
+              },
+              dueTimes: {
+                type: "array",
+                items: { type: ["string", "null"] },
+                description:
+                  "For each input, the clock time as HH:MM, 24-hour, ONLY if the person actually said one. Null when they named a day but no hour. Never invent a time.",
               },
             },
             required: ["categories"],
@@ -396,7 +410,9 @@ router.post("/ai/categorize", aiQuota, async (req, res) => {
 
 TENSE IS DECISIVE between journal and task. A task has not happened yet. "I sorted out the support ticket and opened a case" is journal — it is done, the user is recounting it. "I need to prepare the tea before we leave" is a task — it is still ahead of them. Past tense is never a task however action-like the verbs are; a completed action recounted is the diary.
 
-Due times: when a task says when it happens — "tonight at 9pm", "утре в 8:30", "Wednesday morning" — resolve it against the current time given below and return it in dueDates. Null for anything without a stated time, which is most of them. Never invent one: a reminder in someone's calendar for a moment they did not choose is worse than no reminder.`,
+Due times: when a task says which day — "tonight", "утре", "Wednesday" — resolve it against the current time below and return the calendar date in dueDates as YYYY-MM-DD. Do NOT convert to UTC and do NOT compute an offset; just say which day they meant.
+
+Return a time in dueTimes only when the person actually said one. "в 8:30" has a time; "утре трябва да пътуваме" does not. Leave it null rather than choosing an hour — an invented time becomes a calendar entry at a moment they never named.`,
       messages: [
         {
           role: "user",
@@ -417,7 +433,7 @@ Due times: when a task says when it happens — "tonight at 9pm", "утре в 8
       throw new Error("No tool_use block in Claude response");
     }
 
-    const input = toolUse.input as { categories?: string[]; dueDates?: unknown };
+    const input = toolUse.input as { categories?: string[]; dueDates?: unknown; dueTimes?: unknown };
     const raw = input.categories ?? [];
     const categories: Category[] = texts.map((t, i) =>
       VALID_CATEGORIES.includes(raw[i] as Category)
@@ -425,15 +441,16 @@ Due times: when a task says when it happens — "tonight at 9pm", "утре в 8
         : heuristicCategory(t)
     );
 
-    // Same guard as the splitter: a time only counts if it parses and has not
-    // already passed by more than a day, so a misread date cannot schedule a
-    // reminder for a moment that is gone.
-    const rawDue = Array.isArray(input.dueDates) ? input.dueDates : [];
+    // The arithmetic happens in composeDue rather than in the model, which got
+    // it wrong: a date with no stated time became an event at midnight, and
+    // "25 септември" landed on the 26th.
+    const rawDates = Array.isArray(input.dueDates) ? input.dueDates : [];
+    const rawTimes = Array.isArray(input.dueTimes) ? input.dueTimes : [];
     const dueDates = texts.map((_, i) => {
-      const value = rawDue[i];
-      if (typeof value !== "string" || Number.isNaN(Date.parse(value))) return null;
-      const due = new Date(value);
-      return due.getTime() >= Date.now() - 24 * 60 * 60 * 1000 ? due.toISOString() : null;
+      const date = rawDates[i];
+      if (typeof date !== "string") return null;
+      const time = typeof rawTimes[i] === "string" ? (rawTimes[i] as string) : null;
+      return composeDue({ date, time }, offsetMinutes)?.toISOString() ?? null;
     });
 
     return res.json({ categories, dueDates, source: "claude" });
@@ -553,11 +570,13 @@ Rules:
 // Falls back to punctuation splitting + heuristic categorization if Claude is unavailable.
 
 router.post("/ai/split", aiQuota, async (req, res) => {
-  const { text, now, timeZone } = req.body as {
+  const { text, now, timeZone, utcOffsetMinutes } = req.body as {
     text?: string;
     /** The client's clock. "tonight at 21:20" is meaningless without it. */
     now?: string;
     timeZone?: string;
+    /** As getTimezoneOffset() reports it: positive west of Greenwich. */
+    utcOffsetMinutes?: number;
   };
 
   // Trusted only as far as being a real timestamp: it decides what "tonight"
@@ -565,6 +584,13 @@ router.post("/ai/split", aiQuota, async (req, res) => {
   // the model as nonsense.
   const nowIso = now && !Number.isNaN(Date.parse(now)) ? new Date(now).toISOString() : null;
   const zone = typeof timeZone === "string" && /^[\w+\-/]{1,64}$/.test(timeZone) ? timeZone : null;
+  // Bounded to real offsets; anything else means a broken or hostile client,
+  // and treating it as UTC is better than shifting a task by days.
+  const offsetMinutes =
+    typeof utcOffsetMinutes === "number" && Number.isFinite(utcOffsetMinutes)
+      && Math.abs(utcOffsetMinutes) <= 14 * 60
+      ? utcOffsetMinutes
+      : 0;
 
   if (!text?.trim()) {
     return res.status(400).json({ error: "text is required" });
@@ -626,10 +652,15 @@ router.post("/ai/split", aiQuota, async (req, res) => {
                       description:
                         "Person names genuinely mentioned in this unit, exactly as they appear in the text.",
                     },
-                    dueAt: {
+                    dueDate: {
                       type: ["string", "null"],
                       description:
-                        "For a task with a stated time, when it is due, as an ISO 8601 timestamp with the offset (e.g. 2026-08-20T21:20:00+03:00). Null for anything without a time — most tasks have none, and a made-up deadline is worse than no deadline.",
+                        "For a task that says WHEN, the calendar date as YYYY-MM-DD in the user's own local calendar. Null when no day is stated — most tasks have none.",
+                    },
+                    dueTime: {
+                      type: ["string", "null"],
+                      description:
+                        "The clock time as HH:MM, 24-hour, ONLY if the person actually said a time. Null when they named a day but no hour. Do not invent one.",
                     },
                   },
                   required: ["text", "category", "people"],
@@ -667,7 +698,11 @@ Categories:
 
 People: extract the human beings named in each unit, exactly as written. Shops, apps, brands, companies and places are NOT people — Temu, Trello, Sofia are not names to return.
 
-Due times: when a task states when it happens, return it as dueAt — AND LEAVE THE WORDS IN THE TEXT. "I need to check back on the app later today at 9pm" becomes text "Check back on the app later today at 9pm" with dueAt set, not text "Check back on the app." The timestamp is for the calendar; the sentence is what the person said, and cutting half of it away to store it elsewhere loses the only version they would recognise. "tonight at 21:20", "утре в 8:30", "Wednesday morning" are all times; resolve them against the current time given below and return a full ISO 8601 timestamp with the offset. Leave dueAt null when no time is stated — most tasks have none, and inventing a deadline puts a reminder in someone's calendar for a moment they never chose.`,
+Due times: when a task says when it happens, report the date and time separately — AND LEAVE THE WORDS IN THE TEXT. "I need to check back on the app later today at 9pm" becomes text "Check back on the app later today at 9pm" with dueDate and dueTime set, not text "Check back on the app." The date is for the calendar; the sentence is what the person said, and cutting half of it away loses the only version they would recognise.
+
+Report the date in the user's own calendar as YYYY-MM-DD, resolved against the current time given below. Do NOT convert to UTC and do NOT compute an offset — just say which day they meant.
+
+dueTime is only for a time somebody actually said. "утре в 8:30" has one; "до 25 септември" and "утре трябва да пътуваме до Трън" do not. Leave it null in that case rather than choosing an hour — an invented time becomes a calendar entry at a moment they never named. "tonight at 21:20", "утре в 8:30", "Wednesday morning" are all times; resolve them against the current time given below and return a full ISO 8601 timestamp with the offset. Leave dueAt null when no time is stated — most tasks have none, and inventing a deadline puts a reminder in someone's calendar for a moment they never chose.`,
       messages: [{
         role: "user",
         content: [
@@ -687,7 +722,10 @@ Due times: when a task states when it happens, return it as dueAt — AND LEAVE 
     }
 
     const input = toolUse.input as {
-      units: { text: string; category: string; people: string[]; dueAt?: string | null }[];
+      units: {
+        text: string; category: string; people: string[];
+        dueDate?: string | null; dueTime?: string | null;
+      }[];
     };
 
     if (!Array.isArray(input?.units) || input.units.length === 0) {
@@ -701,15 +739,12 @@ Due times: when a task states when it happens, return it as dueAt — AND LEAVE 
         category: (VALID_CATEGORIES.includes(u.category as Category)
           ? u.category
           : heuristicCategory(u.text)) as Category,
-        // Only trusted if it parses and is not in the past by more than a day:
-        // a model that misreads "утре" as last year would otherwise put a
-        // reminder in a calendar for a moment that has already gone.
-        dueAt: (() => {
-          if (typeof u.dueAt !== "string" || Number.isNaN(Date.parse(u.dueAt))) return null;
-          const due = new Date(u.dueAt);
-          const floor = Date.now() - 24 * 60 * 60 * 1000;
-          return due.getTime() >= floor ? due.toISOString() : null;
-        })(),
+        // The arithmetic happens here rather than in the model, which got it
+        // wrong: "до 25 септември" came back as a timestamp rendering as the
+        // 26th at 00:59. composeDue also rejects impossible and stale dates.
+        dueAt: typeof u.dueDate === "string"
+          ? composeDue({ date: u.dueDate, time: u.dueTime }, offsetMinutes)?.toISOString() ?? null
+          : null,
         people: Array.isArray(u.people)
           ? u.people.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
           : [],

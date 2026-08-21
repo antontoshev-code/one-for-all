@@ -527,6 +527,9 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
           text: entry.content,
           now: new Date().toISOString(),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          // The server composes the timestamp, so it needs the offset rather
+          // than trusting the model to do timezone arithmetic.
+          utcOffsetMinutes: new Date().getTimezoneOffset(),
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
