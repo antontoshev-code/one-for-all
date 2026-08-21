@@ -73,6 +73,15 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 }
 
 export async function signOut(): Promise<void> {
+  // Empty the offline cache first. It holds no personal data by design — only
+  // the app shell — but the shell is cheap to refetch and being certain is
+  // worth more than one avoided download on a device that may be shared.
+  try {
+    navigator.serviceWorker?.controller?.postMessage("clear-cache");
+  } catch {
+    // No service worker, or none controlling this page. Nothing to clear.
+  }
+
   try {
     await post("/sign-out", {});
   } catch {

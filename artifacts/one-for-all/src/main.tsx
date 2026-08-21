@@ -15,3 +15,22 @@ createRoot(document.getElementById('root')!, {
     <App />
   </ErrorBoundary>,
 );
+
+/**
+ * Register the service worker, which makes the app open without a connection.
+ *
+ * Only in production. In development it would serve a cached build over the dev
+ * server and every change would appear not to have happened — a confusing
+ * failure that costs more than offline support is worth while iterating.
+ *
+ * Registration is deliberately last and failure is swallowed: this is an
+ * improvement to how the app loads, and an app that refuses to start because it
+ * could not install a cache would be worse than no cache.
+ */
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js")
+      .catch(err => console.warn("[sw] registration failed", err));
+  });
+}
