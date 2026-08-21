@@ -203,6 +203,33 @@ function vocabularyHint(words: string[]): string | undefined {
   }
 }
 
+/**
+ * Phrases these models emit when handed silence.
+ *
+ * They do not return an empty string over quiet audio — they return something
+ * memorised from training: subtitle sign-offs, "thank you for watching", a
+ * Korean news outro. In a diary that is worse than returning nothing, because
+ * it reads as a thought the person had.
+ *
+ * Whole-string only. Someone genuinely saying "благодаря" into their diary must
+ * keep it.
+ */
+const STOCK_PHRASES = [
+  "thank you", "thank you.", "thanks for watching", "thanks for watching!",
+  "thank you for watching", "thank you for watching.", "you", "bye", "bye.",
+  "subtitles by the amara.org community", "please subscribe",
+  "благодаря", "благодаря.", "благодаря ви", "довиждане",
+  "субтитри", "продължава", "край",
+  "grazie", "grazie mille", "ciao",
+];
+
+function isStockHallucination(text: string): boolean {
+  const cleaned = text.trim().toLowerCase().replace(/\s+/g, " ");
+  // Long output is a real capture whatever it says.
+  if (cleaned.length > 60) return false;
+  return STOCK_PHRASES.includes(cleaned) || STOCK_PHRASES.includes(cleaned.replace(/[.!?]+$/, ""));
+}
+
 router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) => {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -251,18 +278,53 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     // actually change per user — and the correction pass below covers the rest.
     const prompt = vocabularyHint(personal.use);
 
-    const result = await openai.audio.transcriptions.create({
-      file: audioFile,
-      model: "whisper-1",
-      response_format: "verbose_json",
-      temperature: 0,
-      // No `language` is set on purpose. Captures mix Bulgarian and English
-      // freely — "Trello", "Brighteye" inside a Bulgarian sentence — and
-      // pinning the language makes Whisper force those into Cyrillic.
-      ...(prompt ? { prompt } : {}),
-    });
+    /**
+     * A newer model first, falling back to whisper-1.
+     *
+     * whisper-1 is the 2022 model, and it shows on Bulgarian: "деня" came back
+     * as "дня", "се събудя" as "събувам", "пералня" as "паролия". The newer
+     * transcription models are materially better on languages other than
+     * English, which is the whole problem here.
+     *
+     * Attempted rather than assumed. If the model is unavailable to this
+     * account, or the SDK is older than it, the request fails and whisper-1
+     * answers instead — a slightly worse transcript beats none at all, and this
+     * is not a change worth risking every capture on.
+     *
+     * The cost is the segment data: only whisper-1 returns verbose_json with
+     * per-segment no_speech_prob, which is how silence is told from speech. So
+     * the newer path gets the duration check and the known-hallucination list,
+     * and whisper-1 keeps its stronger guard.
+     */
+    const PREFERRED_MODEL = process.env.TRANSCRIBE_MODEL || "gpt-4o-transcribe";
 
-    const verbose = result as unknown as {
+    // No `language` is set on purpose. Captures mix Bulgarian and English
+    // freely — "Trello", "Brighteye" inside a Bulgarian sentence — and pinning
+    // the language forces those into Cyrillic.
+    let result: unknown;
+    let usedFallback = false;
+
+    try {
+      result = await openai.audio.transcriptions.create({
+        file: audioFile,
+        model: PREFERRED_MODEL,
+        response_format: "json",
+        temperature: 0,
+        ...(prompt ? { prompt } : {}),
+      } as never);
+    } catch (err) {
+      logger.warn({ model: PREFERRED_MODEL, err }, "Preferred transcription model failed — using whisper-1");
+      usedFallback = true;
+      result = await openai.audio.transcriptions.create({
+        file: audioFile,
+        model: "whisper-1",
+        response_format: "verbose_json",
+        temperature: 0,
+        ...(prompt ? { prompt } : {}),
+      });
+    }
+
+    const verbose = result as {
       text?: string;
       duration?: number;
       segments?: { no_speech_prob?: number; avg_logprob?: number }[];
@@ -284,8 +346,19 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     }
     const segments = verbose.segments ?? [];
 
-    // Too short to contain a real thought — almost certainly a mis-tap.
-    if ((verbose.duration ?? 0) < 0.6) {
+    // Only when the model reported one. The newer models answer in plain json
+    // with no duration field, and `?? 0` would read that as zero seconds and
+    // throw away every capture as silence.
+    if (typeof verbose.duration === "number" && verbose.duration < 0.6) {
+      return res.json({ transcript: "", source: "no-speech" });
+    }
+
+    // Without segment data there is no no_speech_prob to lean on, so silence is
+    // recognised by what these models actually emit over it: a short, memorised
+    // stock phrase. Matched whole, because "thank you" inside a real sentence is
+    // a real thank you.
+    if (transcript && segments.length === 0 && isStockHallucination(transcript)) {
+      logger.info({ chars: transcript.length }, "Discarded stock phrase over silence");
       return res.json({ transcript: "", source: "no-speech" });
     }
 
@@ -311,6 +384,8 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
       transcript,
       corrections,
       source: transcript ? "whisper" : "no-speech",
+      // Surfaced for diagnosis only; the client treats both the same.
+      model: usedFallback ? "whisper-1" : PREFERRED_MODEL,
     });
   } catch (err) {
     logger.error({ err }, "Whisper transcription failed");
