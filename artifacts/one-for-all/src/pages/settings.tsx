@@ -5,7 +5,7 @@ import { signOut, getSession, type AuthUser } from "@/lib/auth-client";
 import {
   Trash2, AlertTriangle, Info, Loader2, Download,
   Shield, Mic, Sparkles, CheckCircle2, XCircle,
-  Palette, Sun, Moon, Monitor, LogOut, UserX,
+  Palette, Sun, Moon, Monitor, LogOut, UserX, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,6 +91,182 @@ function AppearanceSection() {
           );
         })}
       </div>
+    </section>
+  );
+}
+
+// ── Vocabulary ────────────────────────────────────────────────────────────
+
+interface VocabWord {
+  id: number;
+  word: string;
+  kind: "use" | "keep";
+  source: "learned" | "manual";
+}
+
+/**
+ * The words this account has taught the app, and a way to take them back.
+ *
+ * Learning from corrections is only safe if it can be undone. A word picked up
+ * from a typo would otherwise quietly bend every future transcription towards
+ * it, with nothing to look at and no way to say no.
+ */
+function VocabularySection() {
+  const [words, setWords] = useState<VocabWord[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
+
+  const load = () => {
+    fetch("/api/vocabulary")
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(setWords)
+      .catch(() => setFailed(true));
+  };
+
+  useEffect(load, []);
+
+  const remove = async (id: number) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/vocabulary/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(String(res.status));
+      setWords(prev => prev?.filter(w => w.id !== id) ?? null);
+    } catch (err) {
+      console.error("Failed to remove the word", err);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const add = async () => {
+    const word = draft.trim();
+    if (!word) return;
+    setIsAdding(true);
+    try {
+      const res = await fetch("/api/vocabulary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setDraft("");
+      load();
+    } catch (err) {
+      console.error("Failed to add the word", err);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const used = words?.filter(w => w.kind === "use") ?? [];
+  const kept = words?.filter(w => w.kind === "keep") ?? [];
+
+  return (
+    <section className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">
+      <div className="flex items-center gap-2 mb-3">
+        <BookOpen className="w-5 h-5 text-primary shrink-0" />
+        <h2 className="text-base font-semibold">Words the app has learned</h2>
+      </div>
+      <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+        When you fix a word in a transcript, it is remembered so future recordings
+        get it right. These stay on your account and are never shared.
+      </p>
+
+      {failed ? (
+        <p className="text-sm text-muted-foreground">Could not load your words.</p>
+      ) : words === null ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {used.length === 0 && kept.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Nothing yet. Correct a word in a transcript before saving and it will
+              appear here.
+            </p>
+          )}
+
+          {used.length > 0 && (
+            <div>
+              <p className="text-xs uppercase tracking-wider font-semibold text-muted-foreground mb-2">
+                Spellings it will use
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {used.map(w => (
+                  <span
+                    key={w.id}
+                    className="inline-flex items-center gap-1.5 bg-secondary rounded-full pl-3 pr-1.5 py-1 text-sm"
+                  >
+                    {w.word}
+                    <button
+                      onClick={() => remove(w.id)}
+                      disabled={busyId === w.id}
+                      className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                      aria-label={`Forget ${w.word}`}
+                    >
+                      {busyId === w.id
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : <XCircle className="w-3.5 h-3.5" />}
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {kept.length > 0 && (
+            <div>
+              <p className="text-xs uppercase tracking-wider font-semibold text-muted-foreground mb-2">
+                Words it will never change
+              </p>
+              <p className="text-xs text-muted-foreground mb-2">
+                Added when you undo a suggested correction.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {kept.map(w => (
+                  <span
+                    key={w.id}
+                    className="inline-flex items-center gap-1.5 bg-secondary/60 rounded-full pl-3 pr-1.5 py-1 text-sm text-muted-foreground"
+                  >
+                    {w.word}
+                    <button
+                      onClick={() => remove(w.id)}
+                      disabled={busyId === w.id}
+                      className="hover:text-destructive disabled:opacity-50"
+                      aria-label={`Stop protecting ${w.word}`}
+                    >
+                      {busyId === w.id
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : <XCircle className="w-3.5 h-3.5" />}
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 pt-1">
+            <Input
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") add(); }}
+              placeholder="Add a word it keeps getting wrong…"
+              className="h-9 text-sm bg-background"
+            />
+            <Button
+              variant="outline"
+              className="rounded-full h-9 shrink-0"
+              disabled={isAdding || !draft.trim()}
+              onClick={add}
+            >
+              {isAdding ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add"}
+            </Button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -317,6 +493,9 @@ export default function Settings() {
             the resulting text is saved.
           </p>
         </section>
+
+        {/* ── Learned vocabulary ──────────────────────────────────────────── */}
+        <VocabularySection />
 
         {/* ── Privacy Notice ───────────────────────────────────────────────── */}
         <section className="bg-card border border-border/50 rounded-3xl p-5 shadow-sm">

@@ -50,27 +50,41 @@ function routesFromSource(): string[] {
   return [...new Set(found)].sort();
 }
 
-function pathsFromSpec(): Set<string> {
+/**
+ * Every "method path" pair the spec documents.
+ *
+ * Methods matter, not just paths. The first version collected paths alone, and
+ * a POST added to a path that already documented a GET passed unnoticed —
+ * precisely the drift this exists to catch.
+ */
+function operationsFromSpec(): Set<string> {
   const spec = readFileSync(SPEC, "utf8");
-  const paths = new Set<string>();
+  const operations = new Set<string>();
   let inPaths = false;
+  let currentPath: string | null = null;
 
   for (const line of spec.split("\n")) {
     if (/^paths:/.test(line)) { inPaths = true; continue; }
-    if (inPaths && /^\S/.test(line)) break;          // dedented out of paths:
-    const m = /^ {2}(\/\S*):\s*$/.exec(line);
-    if (m) paths.add(m[1]);
+    if (!inPaths) continue;
+    if (/^\S/.test(line)) break;                      // dedented out of paths:
+
+    const path = /^ {2}(\/\S*):\s*$/.exec(line);
+    if (path) { currentPath = path[1]; continue; }
+
+    const method = /^ {4}(get|post|put|patch|delete):\s*$/.exec(line);
+    if (method && currentPath) operations.add(`${method[1]} ${currentPath}`);
   }
 
-  return paths;
+  return operations;
 }
 
 describe("OpenAPI spec coverage", () => {
-  test("the spec parses and describes some paths", () => {
+  test("the spec parses and describes some operations", () => {
     // If the extraction breaks, every other assertion here passes vacuously.
-    const paths = pathsFromSpec();
-    assert.ok(paths.size > 0, "no paths extracted from openapi.yaml");
-    assert.ok(paths.has("/entries"), "expected /entries in the spec");
+    const operations = operationsFromSpec();
+    assert.ok(operations.size > 0, "no operations extracted from openapi.yaml");
+    assert.ok(operations.has("get /entries"), "expected GET /entries in the spec");
+    assert.ok(operations.has("post /entries"), "expected POST /entries in the spec");
   });
 
   test("the route scan finds routes", () => {
@@ -79,12 +93,10 @@ describe("OpenAPI spec coverage", () => {
   });
 
   test("every route is documented or deliberately excluded", () => {
-    const specPaths = pathsFromSpec();
-    const undocumented = routesFromSource().filter(route => {
-      if (route in INTENTIONALLY_UNDOCUMENTED) return false;
-      const path = route.slice(route.indexOf(" ") + 1);
-      return !specPaths.has(path);
-    });
+    const documented = operationsFromSpec();
+    const undocumented = routesFromSource().filter(
+      route => !(route in INTENTIONALLY_UNDOCUMENTED) && !documented.has(route),
+    );
 
     assert.deepEqual(
       undocumented,

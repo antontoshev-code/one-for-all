@@ -498,6 +498,45 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/VocabularyWord"
+    post:
+      operationId: addVocabularyWord
+      tags: [vocabulary]
+      summary: Add a word by hand
+      description: >
+        Distinct from /vocabulary/learn, which infers a correction from an edit
+        and applies rules about what counts as a repair. A word typed here is
+        not an inference — the user is stating it — and putting it through those
+        rules would reject exactly the words they most want to add.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [word]
+              properties:
+                word:
+                  type: string
+                  minLength: 2
+                  maxLength: 60
+      responses:
+        "200":
+          description: Added, or already present
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  word:
+                    type: string
+                  alreadyPresent:
+                    type: boolean
+        "400":
+          description: The word was empty, too long, or not a single word
+        "409":
+          description: The word list is full
 
   /vocabulary/learn:
     post:

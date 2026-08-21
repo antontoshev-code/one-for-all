@@ -625,7 +625,7 @@ Categories:
 
 People: extract the human beings named in each unit, exactly as written. Shops, apps, brands, companies and places are NOT people — Temu, Trello, Sofia are not names to return.
 
-Due times: when a task states when it happens, return it as dueAt. "tonight at 21:20", "утре в 8:30", "Wednesday morning" are all times; resolve them against the current time given below and return a full ISO 8601 timestamp with the offset. Leave dueAt null when no time is stated — most tasks have none, and inventing a deadline puts a reminder in someone's calendar for a moment they never chose.`,
+Due times: when a task states when it happens, return it as dueAt — AND LEAVE THE WORDS IN THE TEXT. "I need to check back on the app later today at 9pm" becomes text "Check back on the app later today at 9pm" with dueAt set, not text "Check back on the app." The timestamp is for the calendar; the sentence is what the person said, and cutting half of it away to store it elsewhere loses the only version they would recognise. "tonight at 21:20", "утре в 8:30", "Wednesday morning" are all times; resolve them against the current time given below and return a full ISO 8601 timestamp with the offset. Leave dueAt null when no time is stated — most tasks have none, and inventing a deadline puts a reminder in someone's calendar for a moment they never chose.`,
       messages: [{
         role: "user",
         content: [

@@ -66,6 +66,56 @@ router.post("/vocabulary/learn", async (req, res) => {
 });
 
 /**
+ * POST /vocabulary — add a word by hand.
+ *
+ * Separate from /learn on purpose. Learning infers a correction from an edit
+ * and applies rules about what counts as a repair — the first letter must
+ * match, the words must be close. A word typed here is not an inference; the
+ * user is stating it, and putting it through the repair rules would reject
+ * exactly the words they most want to add.
+ */
+router.post("/vocabulary", async (req, res) => {
+  const { word } = req.body as { word?: string };
+  const trimmed = typeof word === "string" ? word.trim() : "";
+
+  if (!trimmed) {
+    res.status(400).json({ error: "word must be a non-empty string" });
+    return;
+  }
+
+  // Long enough to be a word, short enough not to be a sentence pasted in.
+  if (trimmed.length < 2 || trimmed.length > 60 || /\s{2,}/.test(trimmed)) {
+    res.status(400).json({ error: "word must be between 2 and 60 characters" });
+    return;
+  }
+
+  try {
+    const [{ count } = { count: 0 }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(vocabularyTable)
+      .where(eq(vocabularyTable.userId, req.userId));
+
+    if (count >= MAX_WORDS_PER_USER) {
+      res.status(409).json({ error: "Your word list is full", detail: "Remove a word first." });
+      return;
+    }
+
+    const [added] = await db
+      .insert(vocabularyTable)
+      .values({ userId: req.userId, word: trimmed, kind: "use", source: "manual" })
+      .onConflictDoNothing()
+      .returning({ id: vocabularyTable.id, word: vocabularyTable.word });
+
+    // Nothing returned means it was already there, which is a success from the
+    // user's point of view — the word is in the list either way.
+    res.json(added ?? { word: trimmed, alreadyPresent: true });
+  } catch (err) {
+    logger.error({ err }, "Failed to add a vocabulary word");
+    res.status(500).json({ error: "Failed to add the word" });
+  }
+});
+
+/**
  * POST /vocabulary/keep — stop correcting a word the user put back.
  *
  * Undoing a suggested correction says the original was right. Without recording
