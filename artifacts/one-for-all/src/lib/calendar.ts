@@ -121,3 +121,33 @@ export function downloadIcs(event: CalendarEvent): void {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * A Google Calendar "create event" link.
+ *
+ * The .ics download works everywhere but is a poor experience on a phone: the
+ * file lands in Downloads and the person has to find it and decide what opens
+ * it. A link goes straight to a pre-filled event they confirm in one tap.
+ *
+ * This is deliberately a link and not the Google Calendar API. The API would
+ * mean asking every user for permission to read and write their whole calendar,
+ * storing a refresh token, and holding a scope that could read every meeting
+ * they have — a serious amount of access for an app whose promise is that it
+ * keeps to itself. The link needs no permission at all, and the event is only
+ * created if they press save.
+ */
+export function googleCalendarUrl(event: CalendarEvent): string {
+  const end = new Date(event.start.getTime() + (event.durationMinutes ?? 60) * 60_000);
+
+  // Google wants the same compact UTC form as iCalendar, joined by a slash.
+  const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: event.title.slice(0, 200),
+    dates: `${stamp(event.start)}/${stamp(end)}`,
+    details: "Added from One for All",
+  });
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}

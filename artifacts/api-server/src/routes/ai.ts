@@ -6,7 +6,8 @@ import { logger } from "../lib/logger";
 import { aiQuota, MAX_AUDIO_BYTES, MAX_TEXT_CHARS } from "../lib/ai-guard";
 import { db, eq, and, notDeleted, peopleTable, vocabularyTable } from "@workspace/db";
 import {
-  correctTranscript, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN, LOANWORDS_BG, BRANDS,
+  correctTranscript, stripLeadingFiller,
+  PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN, LOANWORDS_BG, BRANDS,
 } from "../lib/vocabulary";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -55,13 +56,13 @@ const LOG_WORDS = [
   "weight ", "weighed", "bmi", "heart rate", "pulse", "blood pressure", "steps taken",
   "headache", "stomachache", "pain", "sore", "symptom", "sick", "fever", "nausea",
   "medication", "vitamins", "supplements",
-    // Strength-training vocabulary. "I did my standard calisthenics protocol
-    // and 45 kg bench press 3 sets" had one hit in thirteen words and read as
-    // narrative, so a plainly physical note was filed as a diary entry and
-    // then offered for splitting away from its own first sentence.
-    "calisthenics", "sets", "set of", "kg", "bodyweight", "cardio", "stretching",
-    "plank", "burpees", "lunges", "curls", "press", "rows", "dips", "chin-up",
-    "warm up", "warmed up", "cool down", "protocol", "circuit", "interval",
+  // Strength-training vocabulary. "I did my standard calisthenics protocol and
+  // 45 kg bench press 3 sets" had one hit in thirteen words and read as
+  // narrative, so a plainly physical note was filed as a diary entry and then
+  // offered for splitting away from its own first sentence.
+  "calisthenics", "sets", "set of", "kg", "bodyweight", "cardio", "stretching",
+  "plank", "burpees", "lunges", "curls", "press", "rows", "dips", "chin-up",
+  "warm up", "warmed up", "cool down", "protocol", "circuit", "interval",
   "тренирах", "тренировка", "тренирам", "фитнес", "бягах", "бягане", "плувах",
   "лицеви", "коремни", "клекове", "набирания", "щанга", "серии", "повторения",
   "кардио", "спах", "не спах", "събудих се", "умора", "изтощен", "енергия",
@@ -269,7 +270,9 @@ router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) 
     // Whisper ignored the prompt often enough that this is not optional: a
     // capture naming Петя came back with "Пети" while her name was in it.
     // Here the answer is deterministic rather than a hint.
-    const { text: transcript, corrections } = correctTranscript(raw, vocabulary);
+    // Filler first, so a correction is never applied to a word that is about
+    // to be removed and then reported as a change the user never saw.
+    const { text: transcript, corrections } = correctTranscript(stripLeadingFiller(raw), vocabulary);
     if (corrections.length > 0) {
       // Count only. The corrected words come from the user's captures, and the
       // privacy page says server logs never record what they wrote — logging

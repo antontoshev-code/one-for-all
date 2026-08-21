@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   correctTranscript, editDistance, PLACES_BG, TERMS, ADDRESS_BG, ADDRESS_EN, LOANWORDS_BG, BRANDS,
+  stripLeadingFiller,
 } from "./vocabulary.ts";
 
 describe("editDistance", () => {
@@ -136,5 +137,58 @@ describe("correctTranscript", () => {
     assert.ok(LOANWORDS_BG.includes("съпорт"));
     assert.ok(LOANWORDS_BG.includes("доставка"));
     assert.ok(BRANDS.includes("Тему"));
+  });
+});
+
+describe("stripLeadingFiller", () => {
+  test("removes a bare leading conjunction", () => {
+    // "And we're going hiking" — the person did not start with "And".
+    assert.equal(
+      stripLeadingFiller("And we're going hiking, and I'm really excited"),
+      "We're going hiking, and I'm really excited",
+    );
+  });
+
+  test("removes stacked filler", () => {
+    assert.equal(
+      stripLeadingFiller("Okay, well, I was trying to understand something"),
+      "I was trying to understand something",
+    );
+  });
+
+  test("removes Bulgarian filler", () => {
+    assert.equal(stripLeadingFiller("Ами, днес беше приятен ден"), "Днес беше приятен ден");
+    assert.equal(stripLeadingFiller("И се видях с Петя"), "Се видях с Петя");
+  });
+
+  test("recapitalises the new first word", () => {
+    assert.match(stripLeadingFiller("So we agreed to meet"), /^We agreed/);
+  });
+
+  test("leaves a sentence that does not start with filler", () => {
+    const text = "Днес беше доста приятен ден";
+    assert.equal(stripLeadingFiller(text), text);
+  });
+
+  test("does not eat a real word that happens to match", () => {
+    // "Right turn at the lights" is not filler; "Right, I need to…" is. The
+    // difference is the punctuation.
+    assert.equal(stripLeadingFiller("Right turn at the lights"), "Right turn at the lights");
+  });
+
+  test("stops after three, so a capture cannot be eaten away", () => {
+    const out = stripLeadingFiller("So, well, okay, and, anyway, I went out");
+    assert.ok(out.length > 0);
+    assert.ok(out.includes("I went out"));
+  });
+
+  test("leaves an empty or whitespace-only transcript alone", () => {
+    assert.equal(stripLeadingFiller(""), "");
+    assert.equal(stripLeadingFiller("   "), "   ");
+  });
+
+  test("does not strip filler that is the entire capture", () => {
+    // Nothing follows it, so there is no sentence to promote.
+    assert.equal(stripLeadingFiller("Okay"), "Okay");
   });
 });

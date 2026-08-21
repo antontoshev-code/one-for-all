@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { buildIcs } from "./calendar.ts";
+import { buildIcs, googleCalendarUrl } from "./calendar.ts";
 
 const BASE = {
   title: "Feedback session with Petya",
@@ -93,5 +93,45 @@ describe("buildIcs", () => {
     const ics = buildIcs({ ...BASE, title: long });
     assert.ok(ics.includes("…"), "expected the summary to be trimmed");
     assert.ok(ics.includes("DESCRIPTION:"), "expected the full title kept");
+  });
+});
+
+describe("googleCalendarUrl", () => {
+  test("points at Google's event template", () => {
+    const url = new URL(googleCalendarUrl(BASE));
+    assert.equal(url.origin + url.pathname, "https://calendar.google.com/calendar/render");
+    assert.equal(url.searchParams.get("action"), "TEMPLATE");
+  });
+
+  test("carries the task as the event title", () => {
+    const url = new URL(googleCalendarUrl(BASE));
+    assert.equal(url.searchParams.get("text"), "Feedback session with Petya");
+  });
+
+  test("writes the range in Google's compact UTC form", () => {
+    const url = new URL(googleCalendarUrl(BASE));
+    assert.equal(url.searchParams.get("dates"), "20260820T182000Z/20260820T192000Z");
+  });
+
+  test("honours an explicit duration", () => {
+    const url = new URL(googleCalendarUrl({ ...BASE, durationMinutes: 30 }));
+    assert.equal(url.searchParams.get("dates"), "20260820T182000Z/20260820T185000Z");
+  });
+
+  test("escapes characters that would otherwise break the query", () => {
+    // A task containing & or = would truncate or corrupt the parameters.
+    const url = new URL(googleCalendarUrl({ ...BASE, title: "Tea & biscuits = good" }));
+    assert.equal(url.searchParams.get("text"), "Tea & biscuits = good");
+  });
+
+  test("survives a Cyrillic title", () => {
+    const title = "Обратна връзка с Петя";
+    const url = new URL(googleCalendarUrl({ ...BASE, title }));
+    assert.equal(url.searchParams.get("text"), title);
+  });
+
+  test("trims a title too long for a URL", () => {
+    const url = new URL(googleCalendarUrl({ ...BASE, title: "A".repeat(500) }));
+    assert.equal((url.searchParams.get("text") ?? "").length, 200);
   });
 });

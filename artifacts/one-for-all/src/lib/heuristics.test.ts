@@ -123,6 +123,12 @@ describe("detectNamesInChunk", () => {
     assert.deepEqual(r.map(x => x.suggestedName), ["Sarah"]);
   });
 
+  test("does not offer a social network as a person", () => {
+    // "which couple I'm watching in this video from Twitter" offered Twitter.
+    const r = detectNamesInChunk("watching a video from Twitter with Anton", []);
+    assert.deepEqual(r.map(x => x.suggestedName), ["Anton"]);
+  });
+
   test("returns nothing for text with no names", () => {
     assert.deepEqual(detectNamesInChunk("went for a run and made lunch", []), []);
   });

@@ -118,6 +118,14 @@ export const PLACES_BG = [
  * that a general model has no reason to know in a Bulgarian sentence.
  */
 export const TERMS = [
+  "Twitter", "Туитър", "X", "Reddit", "LinkedIn", "Pinterest", "Snapchat",
+  "Twitch", "Discord", "Threads", "Bluesky", "Mastodon", "Substack", "Medium",
+  "Dropbox", "OneDrive", "iCloud", "Outlook", "Chrome", "Safari", "Firefox",
+  "Windows", "Android", "iPhone", "iPad", "Steam", "Xbox", "PlayStation",
+  "Wikipedia", "Уикипедия", "ChatGPT", "OpenAI", "Anthropic", "Gemini",
+  "Canva", "Miro", "Asana", "Jira", "Airtable", "Shopify", "Stripe", "Wise",
+  "Yettel", "Vivacom", "Ryanair", "Wizz", "IKEA", "Икеа", "Decathlon",
+  "Starbucks", "KFC",
   "Trello", "Notion", "Slack", "Figma", "GitHub", "Replit", "Claude", "Whisper",
   "тараторче", "таратор", "баница", "лютеница", "мусака", "шопска",
 ];
@@ -320,3 +328,54 @@ export const BRANDS = [
   "Booking", "Airbnb", "Kaufland", "Кауфланд", "Lidl", "Лидл", "Billa", "Била",
   "Fantastico", "Фантастико", "DM", "Технополис", "Емаг", "Джъмбо", "Jumbo",
 ];
+
+/**
+ * Discourse markers that transcription puts at the front of a capture.
+ *
+ * "And we're going hiking" — the person did not start with "And". Speech
+ * recognition hears the breath and hesitation before a thought and renders it
+ * as a conjunction, so nearly every voice capture opens with one. It reads as
+ * though the diary entry is continuing a conversation that never happened.
+ *
+ * Only stripped at the very start, and only these words. "И" is a real word in
+ * the middle of a Bulgarian sentence, and "So we agreed" says something that
+ * "we agreed" does not.
+ */
+const LEADING_FILLER = [
+  // English
+  "and", "so", "okay", "ok", "well", "um", "uh", "erm", "like", "yeah", "right",
+  "anyway", "basically", "actually", "i mean",
+  // Bulgarian
+  "и", "ами", "значи", "така", "добре", "ъъ", "ееее", "еми", "нали", "тъй",
+];
+
+/**
+ * Remove the filler a transcription put in front of the first real word.
+ *
+ * Runs a few times, because "Okay, well, I was trying to…" stacks two of them.
+ * Stops at three so a capture that genuinely begins with a run of short words
+ * cannot be eaten away.
+ */
+export function stripLeadingFiller(text: string): string {
+  let out = text.trimStart();
+
+  for (let i = 0; i < 3; i++) {
+    // A marker only counts when punctuation or a following word separates it
+    // from the sentence — "Right, I need to…" is filler, "Right turn at the
+    // lights" is not.
+    const match = /^([\p{L}]+(?:\s+[\p{L}]+)?)\s*[,.]\s+(?=\p{L})/u.exec(out);
+    if (!match) break;
+    if (!LEADING_FILLER.includes(match[1].toLowerCase())) break;
+    out = out.slice(match[0].length);
+  }
+
+  // A bare conjunction with no comma after it — "And we're going hiking".
+  const bare = /^(and|so|и)\s+(?=\p{L})/iu.exec(out);
+  if (bare) out = out.slice(bare[0].length);
+
+  if (out === text.trimStart()) return text;
+
+  // Whatever now starts the sentence has to be capitalised, since the word that
+  // was capitalised has gone.
+  return out.charAt(0).toLocaleUpperCase() + out.slice(1);
+}

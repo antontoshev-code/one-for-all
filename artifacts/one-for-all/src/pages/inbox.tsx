@@ -29,7 +29,6 @@ import {
   categorizeContent,
   splitIntoChunks,
   groupIntoUnits,
-  looksWorthSplitting,
   detectNamesInChunk,
   type NameDetectionResult,
 } from "@/lib/heuristics";
@@ -307,7 +306,16 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
    * render and must be instant and free — the real split still asks Claude
    * once the user commits to it.
    */
-  const looksMultiPart = looksWorthSplitting(entry.content ?? "");
+  /**
+   * The categories this capture appears to contain.
+   *
+   * "Looks like a Task entry" was misleading for a capture that is mostly a
+   * diary entry with one thing to do at the end — it announced the smaller half
+   * as though it were the whole. Naming both is honest about why the app is
+   * offering to split it.
+   */
+  const partCategories = [...new Set(groupIntoUnits(entry.content ?? "").map(u => u.category))];
+  const looksMultiPart = partCategories.length > 1;
 
   /**
    * Editing the capture text here, not only at the moment of recording.
@@ -819,7 +827,20 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-foreground flex items-center gap-2">
               <SparkleIcon />
-              Looks like a <span className="capitalize font-semibold text-primary">{suggestedCat}</span> entry
+              Looks like{" "}
+              {partCategories.length > 1 ? (
+                <>
+                  {partCategories.map((cat, i) => (
+                    <span key={cat}>
+                      {i > 0 && <span className="text-muted-foreground"> &amp; </span>}
+                      <span className="capitalize font-semibold text-primary">{cat}</span>
+                    </span>
+                  ))}
+                  {" "}together
+                </>
+              ) : (
+                <>a <span className="capitalize font-semibold text-primary">{suggestedCat}</span> entry</>
+              )}
             </p>
           </div>
 
@@ -1008,7 +1029,7 @@ function InboxCard({ entry, index }: { entry: any; index: number }) {
               className="inline-flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 disabled:opacity-50"
             >
               {isProcessing && <Loader2 className="w-3 h-3 animate-spin" />}
-              Keep it as one {suggestedCat} entry
+              Keep it as one {suggestedCat} entry instead
             </button>
           ) : (
             <button

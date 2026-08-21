@@ -4,11 +4,14 @@ import {
   getListEntriesQueryKey, getGetEntryStatsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Trash2, AlertCircle, Pencil, Check, X, CalendarPlus, Clock } from "lucide-react";
+import {
+  Loader2, Trash2, AlertCircle, Pencil, Check, X, CalendarPlus, Clock, Download,
+} from "lucide-react";
 import { formatDate, formatDueDate } from "@/lib/utils";
-import { downloadIcs } from "@/lib/calendar";
+import { downloadIcs, googleCalendarUrl } from "@/lib/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
@@ -304,20 +307,54 @@ export default function CategoryList({ category, title, description }: CategoryL
                           {formatDueDate(dueAt)}
                         </span>
                         {!isDone && (
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              downloadIcs({
-                                title: entry.content ?? "Task",
-                                start: dueAt,
-                                uid: `one-for-all-entry-${entry.id}`,
-                              });
-                            }}
-                            className="inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors shrink-0"
-                          >
-                            <CalendarPlus className="w-3.5 h-3.5" />
-                            Add to calendar
-                          </button>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                onClick={e => e.stopPropagation()}
+                                className="inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors shrink-0"
+                              >
+                                <CalendarPlus className="w-3.5 h-3.5" />
+                                Add to calendar
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="w-56 p-2 rounded-2xl"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {/* Google first: a link opens a pre-filled event
+                                  in one tap, whereas the file lands in Downloads
+                                  and leaves the person to work out what opens it. */}
+                              <a
+                                href={googleCalendarUrl({
+                                  title: entry.content ?? "Task",
+                                  start: dueAt,
+                                  uid: `one-for-all-entry-${entry.id}`,
+                                })}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm px-2 py-2 rounded-lg hover:bg-secondary transition-colors"
+                              >
+                                <CalendarPlus className="w-4 h-4 shrink-0 text-primary" />
+                                Google Calendar
+                              </a>
+                              <button
+                                onClick={() => downloadIcs({
+                                  title: entry.content ?? "Task",
+                                  start: dueAt,
+                                  uid: `one-for-all-entry-${entry.id}`,
+                                })}
+                                className="w-full flex items-center gap-2 text-sm px-2 py-2 rounded-lg hover:bg-secondary transition-colors text-left"
+                              >
+                                <Download className="w-4 h-4 shrink-0 text-muted-foreground" />
+                                <span>
+                                  Apple, Outlook, other
+                                  <span className="block text-[11px] text-muted-foreground">
+                                    Downloads a calendar file
+                                  </span>
+                                </span>
+                              </button>
+                            </PopoverContent>
+                          </Popover>
                         )}
                       </div>
                     )}
