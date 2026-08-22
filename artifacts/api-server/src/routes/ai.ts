@@ -215,19 +215,37 @@ function vocabularyHint(words: string[]): string | undefined {
  * keep it.
  */
 const STOCK_PHRASES = [
-  "thank you", "thank you.", "thanks for watching", "thanks for watching!",
-  "thank you for watching", "thank you for watching.", "you", "bye", "bye.",
-  "subtitles by the amara.org community", "please subscribe",
-  "благодаря", "благодаря.", "благодаря ви", "довиждане",
-  "субтитри", "продължава", "край",
-  "grazie", "grazie mille", "ciao",
+  // English subtitle furniture
+  "thank you", "thanks for watching", "thank you for watching", "you", "bye",
+  "subtitles by the amara.org community", "please subscribe", "see you next time",
+  "music", "applause", "laughter", "silence",
+  // Bulgarian pleasantries. A cough came back as "Приятен ден!" — a phrase the
+  // model has heard ending a thousand recordings, offered here as a thought.
+  "благодаря", "благодаря ви", "благодаря за вниманието", "довиждане",
+  "приятен ден", "приятен ден!", "хубав ден", "лека нощ", "добър ден",
+  "здравейте", "здравей", "субтитри", "край", "продължава",
+  // Russian, which the model reaches for when Bulgarian audio is unclear —
+  // the same alphabet and a much larger training share.
+  "спасибо", "спасибо за просмотр", "спасибо за внимание", "до свидания",
+  "продолжение следует", "подписывайтесь на канал", "редактор субтитров",
+  "субтитры", "всем пока", "приятного просмотра",
+  // Italian and a few others that turn up over silence
+  "grazie", "grazie mille", "ciao", "sottotitoli", "gracias", "merci",
+  "vielen dank", "untertitel",
 ];
 
 function isStockHallucination(text: string): boolean {
   const cleaned = text.trim().toLowerCase().replace(/\s+/g, " ");
   // Long output is a real capture whatever it says.
   if (cleaned.length > 60) return false;
-  return STOCK_PHRASES.includes(cleaned) || STOCK_PHRASES.includes(cleaned.replace(/[.!?]+$/, ""));
+
+  const bare = cleaned.replace(/[.!?…\s]+$/u, "");
+  if (STOCK_PHRASES.includes(cleaned) || STOCK_PHRASES.includes(bare)) return true;
+
+  // Cyrillic that is not Bulgarian. The model falls back to Russian when the
+  // audio is unclear, and Russian-only letters are the cheapest reliable tell —
+  // ы, э and ё do not exist in the Bulgarian alphabet at all.
+  return /[ыэё]/u.test(bare);
 }
 
 router.post("/ai/transcribe", upload.single("audio"), aiQuota, async (req, res) => {

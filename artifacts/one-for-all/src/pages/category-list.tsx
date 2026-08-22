@@ -5,8 +5,9 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  Loader2, Trash2, AlertCircle, Pencil, Check, X, CalendarPlus, Clock, Download,
+  Loader2, Trash2, AlertCircle, Pencil, Check, X, CalendarPlus, Clock, Download, User,
 } from "lucide-react";
+import { Link } from "wouter";
 import { formatDate, formatDueDate } from "@/lib/utils";
 import { downloadIcs, googleCalendarUrl } from "@/lib/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -296,6 +297,8 @@ export default function CategoryList({ category, title, description }: CategoryL
             const isExpanded = expandedId === entry.id;
             const isEditing = editingId === entry.id;
             const isDone = entry.isTaskDone;
+            const linkedPeople =
+              (entry as { people?: { id: number; name: string; descriptor: string | null }[] }).people ?? [];
             const rawDue = (entry as { dueAt?: string | null }).dueAt;
             const dueAt = rawDue ? new Date(rawDue) : null;
             const isOverdue = Boolean(dueAt && !isDone && dueAt.getTime() < Date.now());
@@ -426,6 +429,28 @@ export default function CategoryList({ category, title, description }: CategoryL
                             </PopoverContent>
                           </Popover>
                         )}
+                      </div>
+                    )}
+
+                    {/* Who this is about. The link existed only from the
+                        person's side — their profile listed the entries, but an
+                        entry gave no sign it was about anyone. */}
+                    {linkedPeople.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-3">
+                        {linkedPeople.map(person => (
+                          <Link key={person.id} href={`/people/${person.id}`}>
+                            <span
+                              onClick={e => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/70 transition-colors"
+                            >
+                              <User className="w-2.5 h-2.5" />
+                              {person.name}
+                              {person.descriptor && (
+                                <span className="text-muted-foreground">({person.descriptor})</span>
+                              )}
+                            </span>
+                          </Link>
+                        ))}
                       </div>
                     )}
 

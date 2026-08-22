@@ -84,7 +84,38 @@ router.get("/entries", async (req, res): Promise<void> => {
           .where(and(eq(entriesTable.userId, req.userId), notDeleted(entriesTable)))
           .orderBy(sql`${entriesTable.createdAt} desc`);
 
-    res.json(rows);
+    /**
+     * The people each entry mentions, attached to the list.
+     *
+     * A person's profile showed the entries about them, but the entries never
+     * showed the people — so reading back a journal gave no sign that it was
+     * about anyone, and the link was only visible from one side.
+     *
+     * Fetched in one query for the whole page rather than one per entry: a
+     * hundred journal entries would otherwise be a hundred round trips.
+     */
+    const ids = rows.map(r => r.id);
+    const links = ids.length
+      ? await db
+          .select({
+            entryId: entryPeopleTable.entryId,
+            id: peopleTable.id,
+            name: peopleTable.name,
+            descriptor: peopleTable.descriptor,
+          })
+          .from(entryPeopleTable)
+          .innerJoin(peopleTable, eq(entryPeopleTable.personId, peopleTable.id))
+          .where(and(inArray(entryPeopleTable.entryId, ids), notDeleted(peopleTable)))
+      : [];
+
+    const byEntry = new Map<number, { id: number; name: string; descriptor: string | null }[]>();
+    for (const link of links) {
+      const list = byEntry.get(link.entryId) ?? [];
+      list.push({ id: link.id, name: link.name, descriptor: link.descriptor });
+      byEntry.set(link.entryId, list);
+    }
+
+    res.json(rows.map(row => ({ ...row, people: byEntry.get(row.id) ?? [] })));
   } catch (err) {
     res.status(500).json({ error: "Failed to list entries", detail: String(err) });
   }

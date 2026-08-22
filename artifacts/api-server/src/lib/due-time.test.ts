@@ -7,13 +7,14 @@ const SOFIA = -180;
 const NOW = new Date("2026-08-21T18:00:00Z");
 
 describe("composeDue", () => {
-  test("a date with no time lands in the morning, not at midnight", () => {
+  test("a date with no time lands at midday, not at midnight", () => {
     // "до 25 септември" produced a timestamp that rendered as 26 September at
-    // 00:59 — the model doing timezone arithmetic it had no need to do.
+    // 00:59 — the model doing timezone arithmetic it had no need to do. Noon is
+    // visibly a default and leaves the day to act on it.
     const due = composeDue({ date: "2026-09-25" }, SOFIA, NOW);
     assert.ok(due);
-    // 09:00 in Sofia is 06:00 UTC.
-    assert.equal(due.toISOString(), "2026-09-25T06:00:00.000Z");
+    // 12:00 in Sofia is 09:00 UTC.
+    assert.equal(due.toISOString(), "2026-09-25T09:00:00.000Z");
   });
 
   test("the local date is the date that was said", () => {

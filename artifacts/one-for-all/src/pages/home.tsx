@@ -77,6 +77,7 @@ export default function Home() {
     if (mode !== "recording") { setElapsed(0); return; }
 
     const started = Date.now();
+    recordingStartedAt.current = started;
     const timer = setInterval(() => {
       const seconds = Math.floor((Date.now() - started) / 1000);
       setElapsed(seconds);
@@ -107,6 +108,15 @@ export default function Home() {
    * usability problem.
    */
   const [elapsed, setElapsed] = useState(0);
+
+  /**
+   * When recording began, as a ref rather than state.
+   *
+   * MediaRecorder.onstop runs in a closure created when recording started, so
+   * it reads whatever `elapsed` was then — zero. Checking the duration there
+   * against state would discard every capture as too short.
+   */
+  const recordingStartedAt = useRef<number>(0);
   const audioChunks = useRef<Blob[]>([]);
   const webSpeechRef = useRef<WebSpeechRecognition | null>(null);
   // Set to true when Web Speech produces a non-empty transcript — tells
@@ -170,6 +180,24 @@ export default function Home() {
 
       if (audioChunks.current.length > 0) {
         const blob = new Blob(audioChunks.current, { type: mimeType });
+        /**
+         * Too short to be a thought.
+         *
+         * A cough came back as "Приятен ден!" and once as Russian: handed
+         * something that is not speech, the model returns something memorised
+         * rather than nothing. The cheapest fix is not to ask. This also saves
+         * an API call and a slice of the daily allowance on every mis-tap.
+         *
+         * Measured in seconds of recording rather than bytes, since bitrate
+         * varies by device.
+         */
+        const recordedSeconds = (Date.now() - recordingStartedAt.current) / 1000;
+        if (recordedSeconds < 1) {
+          setTranscriptBadge("no-speech");
+          setMode("editing");
+          return;
+        }
+
         const result = await transcribeAudio(blob);
 
         if (recordingSession.current !== session) return; // stale — discard
@@ -457,11 +485,10 @@ export default function Home() {
                 two seconds before someone starts talking. Most transcription
                 mistakes are a phone held at arm's length in the wind. */}
             <p className="text-xs text-muted-foreground text-center max-w-[260px] leading-relaxed">
-              {/* "hold the phone close" excluded everyone on a laptop, and most
-                  transcription failures are a microphone too far away on any
-                  device. */}
-              <strong className="text-foreground">Speak clearly &amp; stay close to the mic</strong>
-              {" — it makes a real difference to how well your words come back."}
+              <strong className="block text-foreground text-sm mb-1">
+                Speak clearly &amp; stay close to the mic
+              </strong>
+              It makes a real difference to how well your words come back to me.
             </p>
           </div>
         )}

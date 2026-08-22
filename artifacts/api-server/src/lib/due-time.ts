@@ -12,8 +12,16 @@
  * tested.
  */
 
-/** When a date is given with no time of day. Morning, not midnight. */
-export const DEFAULT_HOUR = 9;
+/**
+ * When a date is given with no time of day.
+ *
+ * Midday. Midnight is not a guess at all — it is what you get when nothing was
+ * chosen, and it puts "by the 25th" in a calendar at 00:00 on a day the person
+ * may already have slept through. Noon sits in the middle of a working day, so
+ * a reminder arrives while there is still time to act on it, and it is
+ * obviously a default rather than something they said.
+ */
+export const DEFAULT_HOUR = 12;
 
 export interface SpokenDue {
   /** YYYY-MM-DD, as the speaker would write it. */
